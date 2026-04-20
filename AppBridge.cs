@@ -1,0 +1,575 @@
+using System.Collections.Concurrent;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Windows;
+using System.Windows.Threading;
+using FtpClient.Adapters;
+using FtpClient.Models;
+using Microsoft.Web.WebView2.Core;
+using Windows.Security.Credentials;
+
+namespace FtpClient;
+
+// ── COM requirements for WebView2 AddHostObjectToScript ─────────────────────
+// AutoDual: exposes all public members via IDispatch (required by WebView2).
+// ComVisible: marks the class for COM registration.
+//
+// All methods are synchronous from the COM perspective.  Async operations
+// are started fire-and-forget; results are delivered back to JavaScript via
+// CoreWebView2.PostWebMessageAsJson({ type:"response", requestId, result }).
+//
+// This avoids the known WebView2 Task<T> null-return issue (#822) where
+// async methods returning Task<string> may resolve to null in JavaScript.
+[ComVisible(true)]
+[ClassInterface(ClassInterfaceType.AutoDual)]
+public sealed class AppBridge
+{
+    // ── State ────────────────────────────────────────────────────────────────
+    private readonly CoreWebView2 _core;
+    private readonly Dispatcher   _dispatcher;
+
+    /// <summary>Live sessions keyed by GUID string returned to JavaScript.</summary>
+    private readonly ConcurrentDictionary<string, IFileClient> _sessions = new();
+
+    /// <summary>
+    /// Pending host-key confirmation prompts.
+    /// Key = SHA-256 fingerprint string (unique per prompt).
+    /// Value = TCS awaited by SftpFileClient.OnHostKeyReceived on a ThreadPool thread.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>>
+        _pendingHostKeyPrompts = new();
+
+    // ── File paths ───────────────────────────────────────────────────────────
+    private static readonly string SitesPath =
+        Path.Combine(MainWindow.AppDataDir, "sites.json");
+
+    // ── PasswordVault ────────────────────────────────────────────────────────
+    private const string VaultResource = "FtpClient";
+    private static readonly PasswordVault _vault = new();
+
+    // ── JSON options ─────────────────────────────────────────────────────────
+    private static readonly JsonSerializerOptions _json =
+        new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    // ── Constructor ──────────────────────────────────────────────────────────
+    public AppBridge(CoreWebView2 core, Dispatcher dispatcher)
+    {
+        _core       = core;
+        _dispatcher = dispatcher;
+        _core.WebMessageReceived += OnWebMessageReceived;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  CONNECTION
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Begin an async connect.  Result is delivered via:
+    ///   { type:"response", requestId, result: sessionGuid }  on success
+    ///   { type:"error",    requestId, message }              on failure
+    /// </summary>
+    public void Connect(string requestId, string host, int port,
+                        string user, string pass, string protocol)
+    {
+        _ = ConnectCoreAsync(requestId, host, port, user, pass, protocol);
+    }
+
+    private async Task ConnectCoreAsync(string requestId, string host, int port,
+                                        string user, string pass, string protocol)
+    {
+        try
+        {
+            var ftpProtocol = protocol switch
+            {
+                "ftp"           => FtpProtocol.Ftp,
+                "ftps-explicit" => FtpProtocol.FtpsExplicit,
+                "ftps-implicit" => FtpProtocol.FtpsImplicit,
+                "sftp"          => FtpProtocol.Sftp,
+                _               => throw new ArgumentException($"Unknown protocol: '{protocol}'")
+            };
+
+            var profile = new ConnectionProfile
+            {
+                Host     = host,
+                Port     = port,
+                Username = user,
+                Password = pass,
+                Protocol = ftpProtocol
+            };
+
+            IFileClient client = ftpProtocol == FtpProtocol.Sftp
+                ? BuildSftpClient()
+                : new FtpFileClient();
+
+            await client.ConnectAsync(profile);
+
+            var sessionId = Guid.NewGuid().ToString("N");
+            _sessions[sessionId] = client;
+            PostResponse(requestId, sessionId);
+        }
+        catch (Exception ex)
+        {
+            PostError(requestId, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Creates an SftpFileClient wired with the host-key mismatch callback.
+    /// The callback posts a hostKeyPrompt message to JS and awaits user decision.
+    /// </summary>
+    private SftpFileClient BuildSftpClient()
+    {
+        var sftp = new SftpFileClient();
+
+        sftp.HostKeyMismatch = async (hostName, fingerprint) =>
+        {
+            var tcs = new TaskCompletionSource<bool>(
+                          TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingHostKeyPrompts[fingerprint] = tcs;
+
+            // PostWebMessageAsJson must be called on the UI thread.
+            // At this point we're on a ThreadPool thread (Task.Run inside
+            // SftpFileClient.ConnectAsync), so we dispatch.
+            await _dispatcher.InvokeAsync(() =>
+                _core.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new
+                    {
+                        type        = "hostKeyPrompt",
+                        fingerprint,
+                        host        = hostName
+                    })));
+
+            // Block this ThreadPool thread until JS replies or the window closes.
+            return await tcs.Task;
+        };
+
+        return sftp;
+    }
+
+    /// <summary>Closes a session and disposes its client.</summary>
+    public void Disconnect(string sessionId)
+    {
+        if (_sessions.TryRemove(sessionId, out var client))
+            client.Disconnect();
+    }
+
+    /// <summary>
+    /// Called by MainWindow.OnWindowClosing to unblock any ThreadPool threads
+    /// that are blocked on a host-key prompt TCS.  Without this, those threads
+    /// would leak if the user closes the window while an SFTP connect is pending
+    /// a host-key confirmation in the UI.
+    /// Resolves all pending prompts with <c>false</c> (reject), causing the SFTP
+    /// connect to fail cleanly rather than hang.
+    /// </summary>
+    public void CancelPendingPrompts()
+    {
+        foreach (var key in _pendingHostKeyPrompts.Keys.ToList())
+        {
+            if (_pendingHostKeyPrompts.TryRemove(key, out var tcs))
+                tcs.TrySetResult(false);
+        }
+
+        // Also gracefully disconnect all active sessions.
+        foreach (var key in _sessions.Keys.ToList())
+        {
+            if (_sessions.TryRemove(key, out var client))
+            {
+                try { client.Disconnect(); } catch { /* best-effort */ }
+            }
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  DIRECTORY LISTING
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Lists a remote directory.  Result delivered via:
+    ///   { type:"response", requestId, result: JSON-array-of-RemoteItem }
+    /// </summary>
+    public void ListDirectory(string requestId, string sessionId, string path)
+    {
+        _ = ListDirectoryCoreAsync(requestId, sessionId, path);
+    }
+
+    private async Task ListDirectoryCoreAsync(string requestId,
+                                              string sessionId, string path)
+    {
+        try
+        {
+            var client = RequireSession(sessionId);
+            var items  = await client.ListDirectoryAsync(path);
+            PostResponse(requestId, JsonSerializer.Serialize(items, _json));
+        }
+        catch (Exception ex) { PostError(requestId, ex.Message); }
+    }
+
+    /// <summary>
+    /// Lists a local directory synchronously.
+    /// Returns a JSON array directly (no async needed — fast local I/O).
+    /// </summary>
+    public string ListLocalDirectory(string path)
+    {
+        try
+        {
+            var entries = new List<object>();
+
+            foreach (var d in Directory.GetDirectories(path).OrderBy(x => x))
+            {
+                var di = new DirectoryInfo(d);
+                entries.Add(new
+                {
+                    name        = di.Name,
+                    fullPath    = di.FullName,
+                    size        = -1L,
+                    modified    = di.LastWriteTime,
+                    isDirectory = true,
+                    type        = "dir",
+                    permissions = string.Empty
+                });
+            }
+            foreach (var f in Directory.GetFiles(path).OrderBy(x => x))
+            {
+                var fi = new FileInfo(f);
+                entries.Add(new
+                {
+                    name        = fi.Name,
+                    fullPath    = fi.FullName,
+                    size        = fi.Length,
+                    modified    = fi.LastWriteTime,
+                    isDirectory = false,
+                    type        = "file",
+                    permissions = string.Empty
+                });
+            }
+
+            return JsonSerializer.Serialize(entries, _json);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message });
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  TRANSFERS
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Starts an upload.  Progress and completion posted as:
+    ///   { type:"progress", transferId, bytesTransferred, totalBytes,
+    ///                      speedBytesPerSecond, percentComplete, status }
+    ///   status: "active" | "complete" | "error"
+    /// </summary>
+    public void Upload(string sessionId, string localPath,
+                       string remotePath, string transferId)
+    {
+        _ = TransferCoreAsync(
+                transferId,
+                () => RequireSession(sessionId)
+                          .UploadAsync(localPath, remotePath,
+                                       MakeProgress(transferId)));
+    }
+
+    /// <summary>Same event shape as Upload.</summary>
+    public void Download(string sessionId, string remotePath,
+                         string localPath, string transferId)
+    {
+        _ = TransferCoreAsync(
+                transferId,
+                () => RequireSession(sessionId)
+                          .DownloadAsync(remotePath, localPath,
+                                         MakeProgress(transferId)));
+    }
+
+    private async Task TransferCoreAsync(string transferId,
+                                         Func<Task> doTransfer)
+    {
+        try
+        {
+            await doTransfer();
+            PostTransferEvent(transferId, 0, 0, 0, 100, "complete");
+        }
+        catch (Exception ex)
+        {
+            PostTransferEvent(transferId, 0, 0, 0, -1, "error", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Creates an IProgress<TransferProgress> that is bound to the UI thread's
+    /// SynchronizationContext (Progress<T> captures it at construction time).
+    /// Since Upload/Download are called from WebView2 COM callbacks on the UI
+    /// thread, the progress handler automatically runs on the UI thread.
+    /// </summary>
+    private IProgress<TransferProgress> MakeProgress(string transferId) =>
+        new Progress<TransferProgress>(p =>
+            PostTransferEvent(
+                transferId,
+                p.BytesTransferred,
+                p.TotalBytes,
+                p.SpeedBytesPerSecond,
+                p.PercentComplete,
+                "active"));
+
+    private void PostTransferEvent(string transferId, long bytes, long total,
+                                   double speed, double pct, string status,
+                                   string? errorMessage = null)
+    {
+        var payload = errorMessage is null
+            ? JsonSerializer.Serialize(new
+              {
+                  type                = "progress",
+                  transferId,
+                  bytesTransferred    = bytes,
+                  totalBytes          = total,
+                  speedBytesPerSecond = speed,
+                  percentComplete     = pct,
+                  status
+              })
+            : JsonSerializer.Serialize(new
+              {
+                  type       = "progress",
+                  transferId,
+                  status,
+                  message    = errorMessage
+              });
+
+        PostJson(payload);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  FILE OPERATIONS  (void: result posted as { type:"ack", requestId })
+    // ════════════════════════════════════════════════════════════════════════
+
+    public void Mkdir(string requestId, string sessionId, string path)
+        => _ = AckOpAsync(requestId, () => RequireSession(sessionId).MkdirAsync(path));
+
+    public void Rename(string requestId, string sessionId,
+                       string oldPath, string newPath)
+        => _ = AckOpAsync(requestId,
+                           () => RequireSession(sessionId).RenameAsync(oldPath, newPath));
+
+    public void Delete(string requestId, string sessionId, string path)
+        => _ = AckOpAsync(requestId, () => RequireSession(sessionId).DeleteAsync(path));
+
+    private async Task AckOpAsync(string requestId, Func<Task> op)
+    {
+        try
+        {
+            await op();
+            PostJson(JsonSerializer.Serialize(new { type = "ack", requestId }));
+        }
+        catch (Exception ex) { PostError(requestId, ex.Message); }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  SITE MANAGER
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Returns a JSON array of saved sites.  Passwords are retrieved from
+    /// PasswordVault and included (in-process transmission is acceptable;
+    /// no plaintext is written to disk).
+    /// </summary>
+    public string GetSavedSites()
+    {
+        try
+        {
+            var sites = LoadSitesFromDisk();
+            foreach (var site in sites)
+            {
+                var vaultKey = site["name"]?.GetValue<string>();
+                if (vaultKey is null) continue;
+                try
+                {
+                    var cred = _vault.Retrieve(VaultResource, vaultKey);
+                    cred.RetrievePassword();
+                    site["password"] = cred.Password;
+                }
+                catch { /* no saved password for this site */ }
+            }
+            return JsonSerializer.Serialize(sites, _json);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Persists a site.  The JSON may include a "password" field; if present
+    /// it is extracted and stored in PasswordVault — never written to disk.
+    /// </summary>
+    public void SaveSite(string siteJson)
+    {
+        try
+        {
+            var node = JsonNode.Parse(siteJson)?.AsObject()
+                       ?? throw new ArgumentException("Invalid site JSON");
+            var name = node["name"]?.GetValue<string>()
+                       ?? throw new ArgumentException("Site must have a 'name'");
+
+            // Extract and vault the password before writing to disk.
+            if (node["password"]?.GetValue<string>() is { Length: > 0 } pw)
+            {
+                try { _vault.Remove(_vault.Retrieve(VaultResource, name)); }
+                catch { /* no prior entry */ }
+                _vault.Add(new PasswordCredential(VaultResource, name, pw));
+                node.Remove("password");
+            }
+
+            var sites  = LoadSitesFromDisk();
+            var idx    = sites.FindIndex(s =>
+                             s["name"]?.GetValue<string>() == name);
+            if (idx >= 0) sites[idx] = node;
+            else          sites.Add(node);
+
+            SaveSitesToDisk(sites);
+        }
+        catch { /* swallow — non-fatal site-save errors */ }
+    }
+
+    /// <summary>Removes a site from disk and PasswordVault.</summary>
+    public void DeleteSite(string name)
+    {
+        try
+        {
+            var sites = LoadSitesFromDisk();
+            sites.RemoveAll(s => s["name"]?.GetValue<string>() == name);
+            SaveSitesToDisk(sites);
+
+            try { _vault.Remove(_vault.Retrieve(VaultResource, name)); }
+            catch { /* no vault entry */ }
+        }
+        catch { /* swallow */ }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  INBOUND WEB MESSAGES (JS → WPF)
+    // ════════════════════════════════════════════════════════════════════════
+
+    private void OnWebMessageReceived(object? sender,
+        CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        string json;
+        try { json = e.TryGetWebMessageAsString(); }
+        catch { return; }
+
+        try
+        {
+            var doc    = JsonDocument.Parse(json);
+            var root   = doc.RootElement;
+            var action = root.TryGetProperty("action", out var a)
+                         ? a.GetString() : null;
+
+            switch (action)
+            {
+                // ── Host-key prompt responses ────────────────────────────
+                case "trustHost":
+                case "rejectHost":
+                {
+                    var fp = root.GetProperty("fingerprint").GetString()!;
+                    if (_pendingHostKeyPrompts.TryRemove(fp, out var tcs))
+                        tcs.SetResult(action == "trustHost");
+                    break;
+                }
+
+                // ── Window chrome ────────────────────────────────────────
+                case "dragWindow":
+                    _dispatcher.InvokeAsync(() =>
+                        Application.Current.MainWindow?.DragMove());
+                    break;
+
+                case "closeWindow":
+                    _dispatcher.InvokeAsync(() =>
+                        Application.Current.MainWindow?.Close());
+                    break;
+
+                case "minimizeWindow":
+                    _dispatcher.InvokeAsync(() =>
+                    {
+                        if (Application.Current.MainWindow is { } w)
+                            w.WindowState = WindowState.Minimized;
+                    });
+                    break;
+
+                case "maximizeWindow":
+                    _dispatcher.InvokeAsync(() =>
+                    {
+                        if (Application.Current.MainWindow is { } w)
+                            w.WindowState = w.WindowState == WindowState.Maximized
+                                ? WindowState.Normal
+                                : WindowState.Maximized;
+                    });
+                    break;
+            }
+        }
+        catch { /* malformed message — ignore */ }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  HELPERS
+    // ════════════════════════════════════════════════════════════════════════
+
+    private IFileClient RequireSession(string sessionId)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var client))
+            throw new InvalidOperationException(
+                $"No active session '{sessionId}'.");
+        return client;
+    }
+
+    private void PostResponse(string requestId, string result) =>
+        PostJson(JsonSerializer.Serialize(new
+        {
+            type = "response",
+            requestId,
+            result
+        }));
+
+    private void PostError(string requestId, string message) =>
+        PostJson(JsonSerializer.Serialize(new
+        {
+            type = "error",
+            requestId,
+            message
+        }));
+
+    /// <summary>
+    /// Thread-safe PostWebMessageAsJson: dispatches to the UI thread if needed.
+    /// </summary>
+    private void PostJson(string json)
+    {
+        if (_dispatcher.CheckAccess())
+            _core.PostWebMessageAsJson(json);
+        else
+            _dispatcher.InvokeAsync(() => _core.PostWebMessageAsJson(json));
+    }
+
+    // ── Sites JSON persistence ────────────────────────────────────────────
+    private static List<JsonObject> LoadSitesFromDisk()
+    {
+        try
+        {
+            if (!File.Exists(SitesPath)) return new List<JsonObject>();
+            var json  = File.ReadAllText(SitesPath);
+            var array = JsonNode.Parse(json)?.AsArray();
+            return array?
+                .OfType<JsonObject>()
+                .ToList()
+                ?? new List<JsonObject>();
+        }
+        catch { return new List<JsonObject>(); }
+    }
+
+    private static void SaveSitesToDisk(List<JsonObject> sites)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(SitesPath)!);
+        File.WriteAllText(SitesPath,
+            JsonSerializer.Serialize(sites,
+                new JsonSerializerOptions { WriteIndented = true }));
+    }
+}

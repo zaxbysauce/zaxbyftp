@@ -2,7 +2,9 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- windows10.0.17763.0 (= Win10 1809) enables WinRT APIs (PasswordVault etc.)
+         without any extra NuGet package. Min target is reasonable for Win10/11. -->
+    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
     <UseWPF>true</UseWPF>
     <RootNamespace>FtpClient</RootNamespace>
     <AssemblyName>FtpClient</AssemblyName>

@@ -19,15 +19,24 @@ public partial class MainWindow : Window
     // Virtual hostname served to WebView2 — must be a syntactically valid hostname.
     private const string VirtualHost = "ftpclient.local";
 
+    // AppBridge owns all JS↔WPF messaging from Phase 3 onward.
+    private AppBridge? _bridge;
+
     // ── Constructor ──────────────────────────────────────────────────────
     public MainWindow()
     {
         InitializeComponent();
-        Loaded += OnWindowLoaded;
+        Loaded  += OnWindowLoaded;
+        Closing += OnWindowClosing;
+    }
 
-        // Allow JS→WPF messages (used by Phase 3 AppBridge and the drag/resize
-        // workaround described in MainWindow.xaml comments).
-        WebView.WebMessageReceived += OnWebMessageReceived;
+    // ── Window closing ────────────────────────────────────────────────────
+    //    Cancel any pending host-key prompts so their blocked ThreadPool threads
+    //    are released before the process exits.
+    private void OnWindowClosing(object? sender,
+        System.ComponentModel.CancelEventArgs e)
+    {
+        _bridge?.CancelPendingPrompts();
     }
 
     // ── Window loaded: async WebView2 init ──────────────────────────────
@@ -55,11 +64,13 @@ public partial class MainWindow : Window
             WebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                 VirtualHost, UiDir, CoreWebView2HostResourceAccessKind.Allow);
 
-            // Phase 3 hook: AppBridge is registered here.
-            // var bridge = new AppBridge(WebView.CoreWebView2);
-            // WebView.CoreWebView2.AddHostObjectToScript("api", bridge);
+            // Register the IPC bridge — exposes window.chrome.webview.hostObjects.api
+            // to JavaScript.  AppBridge subscribes to WebMessageReceived internally,
+            // so the Phase 1 OnWebMessageReceived handler is no longer needed here.
+            _bridge = new AppBridge(WebView.CoreWebView2, Dispatcher);
+            WebView.CoreWebView2.AddHostObjectToScript("api", _bridge);
 
-            // Phase 1: navigate to the hello page.
+            // Navigate to the hello page (Phase 1) / React app (Phase 4).
             WebView.Source = new Uri($"https://{VirtualHost}/index.html");
         }
         catch (Exception ex)
@@ -76,42 +87,6 @@ public partial class MainWindow : Window
                 MessageBoxImage.Error);
 
             Application.Current.Shutdown(1);
-        }
-    }
-
-    // ── WebView2 → WPF message handler ──────────────────────────────────
-    //    Phase 1: handles window drag/close gestures from JS.
-    //    Phase 3: AppBridge responses are also posted via this channel.
-    private void OnWebMessageReceived(object? sender,
-        CoreWebView2WebMessageReceivedEventArgs e)
-    {
-        try
-        {
-            var json = e.TryGetWebMessageAsString();
-            // Minimal routing — Phase 3 will replace this with a proper dispatcher.
-            if (json == "{\"action\":\"dragWindow\"}")
-            {
-                // Must be called on the UI thread; this handler already is.
-                DragMove();
-            }
-            else if (json == "{\"action\":\"closeWindow\"}")
-            {
-                Close();
-            }
-            else if (json == "{\"action\":\"minimizeWindow\"}")
-            {
-                WindowState = WindowState.Minimized;
-            }
-            else if (json == "{\"action\":\"maximizeWindow\"}")
-            {
-                WindowState = WindowState == WindowState.Maximized
-                    ? WindowState.Normal
-                    : WindowState.Maximized;
-            }
-        }
-        catch
-        {
-            // Swallow parse errors — JS may send non-string messages.
         }
     }
 
