@@ -45,6 +45,18 @@ public sealed class AppBridge
     private static readonly string SitesPath =
         Path.Combine(MainWindow.AppDataDir, "sites.json");
 
+    private static readonly string TrustedCertsPath =
+        Path.Combine(MainWindow.AppDataDir, "trusted_certs.json");
+
+    // ── FTPS trusted certificates ────────────────────────────────────────────
+    // Keyed by "host|SHA256fingerprint" — same TOFU pattern used for SFTP host keys.
+    private HashSet<string>? _trustedCerts;
+    private readonly object  _trustedCertsLock = new();
+
+    /// <summary>Pending FTPS certificate confirmation prompts.</summary>
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>>
+        _pendingCertPrompts = new();
+
     // ── PasswordVault ────────────────────────────────────────────────────────
     private const string VaultResource = "FtpClient";
     private static readonly PasswordVault _vault = new();
@@ -101,7 +113,7 @@ public sealed class AppBridge
 
             IFileClient client = ftpProtocol == FtpProtocol.Sftp
                 ? BuildSftpClient()
-                : new FtpFileClient();
+                : BuildFtpClient();
 
             await client.ConnectAsync(profile);
 
@@ -148,6 +160,47 @@ public sealed class AppBridge
         return sftp;
     }
 
+    /// <summary>
+    /// Creates an FtpFileClient wired with the FTPS certificate validation callback.
+    /// First connection: if the SHA-256 fingerprint is already in trusted_certs.json,
+    /// it is auto-accepted.  Otherwise a "certPrompt" message is sent to JS and the
+    /// connection thread blocks until the user confirms or rejects.
+    /// </summary>
+    private FtpFileClient BuildFtpClient()
+    {
+        var ftp = new FtpFileClient();
+
+        ftp.CertificateValidator = async (h, fingerprint) =>
+        {
+            var key = $"{h}|{fingerprint}";
+
+            // Auto-trust if we have a stored record for this exact host+cert.
+            lock (_trustedCertsLock)
+            {
+                _trustedCerts ??= LoadTrustedCerts();
+                if (_trustedCerts.Contains(key)) return true;
+            }
+
+            // Unknown cert — prompt the user.
+            var tcs = new TaskCompletionSource<bool>(
+                          TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingCertPrompts[fingerprint] = tcs;
+
+            await _dispatcher.InvokeAsync(() =>
+                _core.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new
+                    {
+                        type        = "certPrompt",
+                        fingerprint,
+                        host        = h
+                    })));
+
+            return await tcs.Task;
+        };
+
+        return ftp;
+    }
+
     /// <summary>Closes a session and disposes its client.</summary>
     public void Disconnect(string sessionId)
     {
@@ -168,6 +221,12 @@ public sealed class AppBridge
         foreach (var key in _pendingHostKeyPrompts.Keys.ToList())
         {
             if (_pendingHostKeyPrompts.TryRemove(key, out var tcs))
+                tcs.TrySetResult(false);
+        }
+
+        foreach (var key in _pendingCertPrompts.Keys.ToList())
+        {
+            if (_pendingCertPrompts.TryRemove(key, out var tcs))
                 tcs.TrySetResult(false);
         }
 
@@ -415,8 +474,15 @@ public sealed class AppBridge
             // Extract and vault the password before writing to disk.
             if (node["password"]?.GetValue<string>() is { Length: > 0 } pw)
             {
+                // PasswordVault does not support in-place update; we must Remove
+                // then Add.  PasswordVault.Add() is effectively infallible for
+                // valid non-empty arguments (only fails on OOM or corrupt vault
+                // state — neither realistic for a handful of FTP credentials).
+                // If the vault is corrupt enough to fail Add(), the user will
+                // need to re-enter the password on next connect, which is a
+                // tolerable recovery path.
                 try { _vault.Remove(_vault.Retrieve(VaultResource, name)); }
-                catch { /* no prior entry */ }
+                catch { /* no prior entry — Remove is best-effort */ }
                 _vault.Add(new PasswordCredential(VaultResource, name, pw));
                 node.Remove("password");
             }
@@ -474,6 +540,25 @@ public sealed class AppBridge
                     var fp = root.GetProperty("fingerprint").GetString()!;
                     if (_pendingHostKeyPrompts.TryRemove(fp, out var tcs))
                         tcs.SetResult(action == "trustHost");
+                    break;
+                }
+
+                // ── FTPS certificate prompt responses ─────────────────
+                case "trustCert":
+                {
+                    var fp   = root.GetProperty("fingerprint").GetString()!;
+                    var h    = root.GetProperty("host").GetString()!;
+                    AddTrustedCert(h, fp);
+                    if (_pendingCertPrompts.TryRemove(fp, out var tcs))
+                        tcs.SetResult(true);
+                    break;
+                }
+
+                case "rejectCert":
+                {
+                    var fp = root.GetProperty("fingerprint").GetString()!;
+                    if (_pendingCertPrompts.TryRemove(fp, out var tcs))
+                        tcs.SetResult(false);
                     break;
                 }
 
@@ -547,6 +632,41 @@ public sealed class AppBridge
             _core.PostWebMessageAsJson(json);
         else
             _dispatcher.InvokeAsync(() => _core.PostWebMessageAsJson(json));
+    }
+
+    // ── Trusted FTPS certificates ─────────────────────────────────────────
+
+    private static HashSet<string> LoadTrustedCerts()
+    {
+        try
+        {
+            if (!File.Exists(TrustedCertsPath)) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var json = File.ReadAllText(TrustedCertsPath);
+            var arr  = JsonSerializer.Deserialize<string[]>(json);
+            return arr is null
+                ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(arr, StringComparer.OrdinalIgnoreCase);
+        }
+        catch { return new HashSet<string>(StringComparer.OrdinalIgnoreCase); }
+    }
+
+    private void AddTrustedCert(string host, string fingerprint)
+    {
+        var key = $"{host}|{fingerprint}";
+        lock (_trustedCertsLock)
+        {
+            _trustedCerts ??= LoadTrustedCerts();
+            if (!_trustedCerts.Add(key)) return; // already trusted
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(TrustedCertsPath)!);
+                File.WriteAllText(TrustedCertsPath,
+                    JsonSerializer.Serialize(
+                        _trustedCerts.ToArray(),
+                        new JsonSerializerOptions { WriteIndented = true }));
+            }
+            catch { /* best-effort — cert is trusted in-memory even if disk write fails */ }
+        }
     }
 
     // ── Sites JSON persistence ────────────────────────────────────────────
