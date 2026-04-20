@@ -1,0 +1,43 @@
+<Window x:Class="FtpClient.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="FTP Client"
+        Width="1280" Height="800"
+        MinWidth="800" MinHeight="600"
+        WindowStyle="None"
+        AllowsTransparency="False"
+        ResizeMode="CanResize"
+        Background="#1e1e2e">
+
+    <!--
+        WindowChrome: gives us resize handles on all edges (ResizeBorderThickness=6)
+        without a system title bar (CaptionHeight=0).
+
+        Known Phase 1 limitation: window dragging is not wired yet — the React
+        frontend will call window.chrome.webview.postMessage({action:"dragWindow"})
+        in Phase 4 and MainWindow.xaml.cs will call DragMove() in response.
+
+        Known Phase 1 limitation: WebView2 captures mouse events so the resize
+        hit-test area (6px border) only works when the cursor is on the very edge
+        outside the WebView2 surface. A proper fix (transparent resize overlays)
+        is deferred to Phase 4.
+    -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome ResizeBorderThickness="6"
+                      CaptionHeight="0"
+                      CornerRadius="0"
+                      GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
+
+    <Grid>
+        <!--
+            WebView2 fills the entire client area.
+            Source is set programmatically in MainWindow.xaml.cs after
+            CoreWebView2 is initialized and the virtual host is mapped.
+        -->
+        <wv2:WebView2 x:Name="WebView"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch" />
+    </Grid>
+</Window>

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FTP Client</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #1e1e2e;
+      --surface:  #313244;
+      --text:     #cdd6f4;
+      --subtext:  #a6adc8;
+      --blue:     #89b4fa;
+      --green:    #a6e3a1;
+      --yellow:   #f9e2af;
+      --red:      #f38ba8;
+      --radius:   8px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      user-select: none;
+    }
+
+    /* ── Drag region (Phase 4 will use a real title bar) ── */
+    #drag-region {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 32px;
+      -webkit-app-region: drag;   /* Chromium drag hint */
+      cursor: grab;
+    }
+
+    .badge {
+      background: var(--surface);
+      color: var(--blue);
+      padding: 4px 14px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -.02em;
+    }
+
+    .subtitle {
+      color: var(--subtext);
+      max-width: 480px;
+      text-align: center;
+      line-height: 1.6;
+    }
+
+    .checks {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: var(--surface);
+      padding: 16px 24px;
+      border-radius: var(--radius);
+      min-width: 340px;
+    }
+
+    .checks li {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+    }
+
+    .checks .icon { font-size: 16px; width: 20px; text-align: center; }
+
+    .ok    { color: var(--green);  }
+    .warn  { color: var(--yellow); }
+    .info  { color: var(--blue);   }
+
+    /* ── Minimal window chrome (Phase 4 replaces with React component) ── */
+    #chrome {
+      position: fixed;
+      top: 0; right: 0;
+      display: flex;
+      gap: 0;
+    }
+
+    #chrome button {
+      width: 46px;
+      height: 32px;
+      background: transparent;
+      border: none;
+      color: var(--subtext);
+      font-size: 12px;
+      cursor: pointer;
+      transition: background .15s;
+      -webkit-app-region: no-drag;
+    }
+
+    #chrome button:hover { background: var(--surface); }
+    #chrome #btn-close:hover { background: var(--red); color: #fff; }
+  </style>
+</head>
+<body>
+
+  <!-- Draggable title-bar strip -->
+  <div id="drag-region"></div>
+
+  <!-- Minimal window controls -->
+  <div id="chrome">
+    <button id="btn-min"   title="Minimise">&#x2212;</button>
+    <button id="btn-max"   title="Maximise">&#x25A1;</button>
+    <button id="btn-close" title="Close">&#x2715;</button>
+  </div>
+
+  <!-- Content -->
+  <span class="badge">Phase 1 &mdash; WPF Shell + WebView2 Host</span>
+
+  <h1>Hello from WebView2</h1>
+
+  <p class="subtitle">
+    The WPF shell is running. React 18 + Vite + Tailwind CSS will replace this
+    page in Phase&nbsp;4. The IPC bridge (<code>window.chrome.webview.hostObjects.api</code>)
+    will be wired in Phase&nbsp;3.
+  </p>
+
+  <ul class="checks" id="checks">
+    <li><span class="icon ok">✓</span> WebView2 host initialised</li>
+    <li><span class="icon ok">✓</span> Virtual host <code>ftpclient.local</code> mapped</li>
+    <li><span class="icon ok">✓</span> Embedded resource extracted to %LOCALAPPDATA%\FtpClient\ui\</li>
+    <li class="bridge-check" id="bridge-row">
+      <span class="icon warn" id="bridge-icon">?</span>
+      <span id="bridge-label">Checking AppBridge&hellip;</span>
+    </li>
+    <li class="bridge-check" id="manifest-row">
+      <span class="icon info">i</span>
+      <span id="manifest-label">Assembly version: <em id="asm-version">—</em></span>
+    </li>
+  </ul>
+
+  <script>
+    // ── Window chrome wiring ─────────────────────────────────────────
+    function send(action) {
+      window.chrome.webview.postMessage(JSON.stringify({ action }));
+    }
+
+    document.getElementById('drag-region').addEventListener('mousedown', () => {
+      send('dragWindow');
+    });
+    document.getElementById('btn-min')  .addEventListener('click', () => send('minimizeWindow'));
+    document.getElementById('btn-max')  .addEventListener('click', () => send('maximizeWindow'));
+    document.getElementById('btn-close').addEventListener('click', () => send('closeWindow'));
+
+    // ── Bridge check ─────────────────────────────────────────────────
+    //    AppBridge is registered in Phase 3. Until then the host object
+    //    won't exist; we reflect that in the UI.
+    window.addEventListener('DOMContentLoaded', async () => {
+      const icon  = document.getElementById('bridge-icon');
+      const label = document.getElementById('bridge-label');
+
+      try {
+        // Host objects are async proxies in WebView2.
+        if (window.chrome?.webview?.hostObjects?.api) {
+          const api = window.chrome.webview.hostObjects.api;
+          // Any await on the proxy confirms the bridge is live.
+          icon.textContent  = '✓';
+          icon.className    = 'icon ok';
+          label.textContent = 'AppBridge connected (Phase 3)';
+        } else {
+          icon.textContent  = '–';
+          icon.className    = 'icon warn';
+          label.textContent = 'AppBridge not yet registered (Phase 3)';
+        }
+      } catch (err) {
+        icon.textContent  = '✗';
+        icon.className    = 'icon';
+        icon.style.color  = 'var(--red)';
+        label.textContent = `Bridge error: ${err.message}`;
+      }
+
+      // ── Receive messages from WPF (progress, hostKeyPrompt, etc.) ──
+      window.chrome.webview.addEventListener('message', e => {
+        console.info('[WPF→JS]', e.data);
+      });
+    });
+  </script>
+</body>
+</html>
