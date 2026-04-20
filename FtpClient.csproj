@@ -43,11 +43,10 @@
   <ItemGroup>
     <!-- WebView2: evergreen runtime ships with Windows 11; handles Win 10 too -->
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.*" />
-
-    <!-- Phase 2 additions (commented until needed):
-    <PackageReference Include="FluentFTP"   Version="*" />
-    <PackageReference Include="SSH.NET"     Version="*" />
-    -->
+    <!-- FTP / FTPS adapter -->
+    <PackageReference Include="FluentFTP"   Version="54.*" />
+    <!-- SFTP adapter -->
+    <PackageReference Include="SSH.NET"     Version="2025.*" />
   </ItemGroup>
 
   <!-- ── Embedded UI resources ─────────────────────────────────────────
