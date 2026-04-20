@@ -11,8 +11,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+    <AssemblyVersion>1.0.1.0</AssemblyVersion>
+    <FileVersion>1.0.1.0</FileVersion>
 
     <!-- ── Single-file publish ──────────────────────────────────────────
          These only take effect on `dotnet publish`.
@@ -52,28 +52,43 @@
   </ItemGroup>
 
   <!-- ── React UI build + ZIP embed ───────────────────────────────────
-       BeforeTargets="CoreCompile" ensures the zip exists before the C#
-       compiler tries to embed it as a resource.
+       The UI bundle is embedded in TWO independent steps so that
+       -p:SkipUiBuild=true (used for incremental .NET-only rebuilds) still
+       produces a working binary:
 
-       Set SkipUiBuild=true to bypass during CI or when the dist is
-       already up to date:
-         dotnet build -p:SkipUiBuild=true
+       Step 1 — BUILD (skippable):
+         The BuildReactUi target runs `npm ci` + `npm run build` + ZipDirectory
+         to produce src/ui/ui-bundle.zip.  Skip it when dist is already current:
+           dotnet build -p:SkipUiBuild=true
 
-       The ZipDirectory task (built into MSBuild 15.8+) zips src/ui/dist
-       into src/ui/ui-bundle.zip which is then embedded with LogicalName
-       "ui-bundle.zip".  MainWindow.ExtractUiIfNeeded() extracts it via
+       Step 2 — EMBED (always active):
+         A static ItemGroup embeds whatever ui-bundle.zip is on disk.  This
+         means the zip produced in a previous full build is re-embedded on
+         subsequent SkipUiBuild=true builds — no stale-binary problem.
+
+       MainWindow.ExtractUiIfNeeded() extracts it at runtime via
        System.IO.Compression.ZipArchive.                                  -->
+
+  <!-- Global properties so the path is consistent inside and outside the target. -->
+  <PropertyGroup>
+    <UiDir>$(MSBuildProjectDirectory)\src\ui</UiDir>
+    <UiBundleZip>$(UiDir)\ui-bundle.zip</UiBundleZip>
+  </PropertyGroup>
+
+  <!-- Always embed the ZIP if it exists on disk (produced by a prior full build
+       or by the BuildReactUi target in this same invocation).             -->
+  <ItemGroup Condition="Exists('$(UiBundleZip)')">
+    <EmbeddedResource Include="$(UiBundleZip)">
+      <LogicalName>ui-bundle.zip</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
   <Target Name="BuildReactUi"
           BeforeTargets="CoreCompile"
           Condition="Exists('$(MSBuildProjectDirectory)\src\ui\package.json') AND '$(SkipUiBuild)' != 'true'">
 
     <!-- npm.cmd is required on Windows; MSBuild Exec does not go through
          a login shell so bare "npm" may not be resolved on PATH.         -->
-    <PropertyGroup>
-      <UiDir>$(MSBuildProjectDirectory)\src\ui</UiDir>
-      <UiBundleZip>$(UiDir)\ui-bundle.zip</UiBundleZip>
-    </PropertyGroup>
-
     <Message Text="[FtpClient] npm ci — installing UI dependencies…" Importance="high" />
     <Exec Command="npm.cmd ci"
           WorkingDirectory="$(UiDir)"
@@ -90,14 +105,7 @@
                   DestinationFile="$(UiBundleZip)"
                   Overwrite="true" />
 
-    <!-- Dynamically add the ZIP as an embedded resource.                  -->
-    <ItemGroup>
-      <EmbeddedResource Include="$(UiBundleZip)">
-        <LogicalName>ui-bundle.zip</LogicalName>
-      </EmbeddedResource>
-    </ItemGroup>
-
-    <Message Text="[FtpClient] UI bundle embedded: $(UiBundleZip)" Importance="high" />
+    <Message Text="[FtpClient] UI bundle ready: $(UiBundleZip)" Importance="high" />
   </Target>
 
 </Project>
