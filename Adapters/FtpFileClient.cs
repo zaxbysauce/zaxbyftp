@@ -1,4 +1,6 @@
 using System.IO;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using FluentFTP;
 using FtpClient.Models;
 
@@ -16,6 +18,18 @@ public sealed class FtpFileClient : IFileClient
     private AsyncFtpClient? _ftp;
     private readonly SemaphoreSlim _sem = new(1, 1);
 
+    // ── Certificate validation ───────────────────────────────────────────
+    /// <summary>
+    /// Optional certificate validator for FTPS connections.
+    /// Receives (host, sha256Fingerprint) → true to accept, false to reject.
+    /// If null, all FTPS certificates are rejected (secure default).
+    ///
+    /// The callback is invoked on a ThreadPool thread during the TLS handshake;
+    /// it may safely block (e.g., <c>.GetAwaiter().GetResult()</c>) without
+    /// risking deadlock on the WPF UI thread.
+    /// </summary>
+    public Func<string, string, Task<bool>>? CertificateValidator { get; set; }
+
     // ── Connect ──────────────────────────────────────────────────────────
     public async Task ConnectAsync(ConnectionProfile profile)
     {
@@ -30,17 +44,14 @@ public sealed class FtpFileClient : IFileClient
 
         var config = new FtpConfig
         {
-            EncryptionMode = encMode,
-
-            // TODO Phase 3: surface the certificate details to the UI via AppBridge
-            // instead of blanket-trusting.  This mirrors FileZilla's "accept unknown
-            // certificate" prompt.
-            ValidateAnyCertificate = (profile.Protocol is
-                FtpProtocol.FtpsExplicit or FtpProtocol.FtpsImplicit),
-
+            EncryptionMode     = encMode,
             ConnectTimeout     = 15_000,
             ReadTimeout        = 30_000,
             DataConnectionType = FtpDataConnectionType.AutoPassive,
+            // Note: ValidateAnyCertificate is intentionally NOT set.
+            // Certificate validation is handled per-connection via the
+            // ValidateCertificate event below, which implements TOFU with
+            // user confirmation (analogous to SSH host-key fingerprinting).
         };
 
         var client = new AsyncFtpClient(
@@ -50,6 +61,26 @@ public sealed class FtpFileClient : IFileClient
             profile.EffectivePort,
             config);
 
+        // Wire FTPS certificate validation for Explicit and Implicit TLS.
+        // The event fires on the FluentFTP connection thread (not the UI thread),
+        // so blocking with GetAwaiter().GetResult() is safe.
+        if (profile.Protocol is FtpProtocol.FtpsExplicit or FtpProtocol.FtpsImplicit)
+        {
+            var host = profile.Host;
+            client.ValidateCertificate += (_, e) =>
+            {
+                try
+                {
+                    var cert2 = new X509Certificate2(e.Certificate);
+                    var fp    = cert2.GetCertHashString(HashAlgorithmName.SHA256);
+                    e.Accept  = CertificateValidator is { } validator
+                                ? validator(host, fp).GetAwaiter().GetResult()
+                                : false;  // secure default: reject if no validator wired
+                }
+                catch { e.Accept = false; }
+            };
+        }
+
         // Serialise Connect() through the semaphore like every other operation.
         // FTP doesn't support parallel commands — a concurrent Reconnect during
         // an active operation would corrupt the control-channel state.
@@ -57,7 +88,19 @@ public sealed class FtpFileClient : IFileClient
         try
         {
             _ftp = client;
-            await client.Connect();
+            // Wrap in Task.Run() to ensure FluentFTP's connection work — including
+            // the ValidateCertificate event that fires during the TLS handshake —
+            // executes on a ThreadPool thread with NO SynchronizationContext.
+            //
+            // Without this, ConnectAsync could run while the WPF SynchronizationContext
+            // is captured (if _sem.WaitAsync() completed synchronously), meaning
+            // ValidateCertificate might fire on the UI thread.  Our cert validator
+            // then calls .GetAwaiter().GetResult() on an async lambda that uses
+            // _dispatcher.InvokeAsync() — which deadlocks if the UI thread is blocked.
+            //
+            // Task.Run() guarantees execution on a ThreadPool thread with no context,
+            // exactly as SftpFileClient wraps SSH.NET's synchronous Connect().
+            await Task.Run(() => client.Connect());
         }
         catch
         {
