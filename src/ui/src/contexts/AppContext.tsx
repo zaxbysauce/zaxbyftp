@@ -11,6 +11,7 @@ import React, {
   useContext,
   useEffect,
   useReducer,
+  useRef,
 } from 'react';
 import * as bridge from '../api/bridge';
 import type {
@@ -200,6 +201,9 @@ interface AppContextValue {
   refreshRemote: () => Promise<void>;
   startUpload: (localPath: string, remotePath: string) => void;
   startDownload: (remotePath: string, localPath: string) => void;
+  mkdirRemote: (parentPath: string, name: string) => Promise<void>;
+  renameRemote: (oldPath: string, newPath: string) => Promise<void>;
+  deleteRemote: (path: string) => Promise<void>;
   trustHost: () => void;
   rejectHost: () => void;
   loadSites: () => Promise<void>;
@@ -213,6 +217,17 @@ const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+
+  // ── Stable refs for async operations ─────────────────────────────────────
+  // useCallback closures capture deps at creation time.  Long-running async
+  // operations (mkdir / rename / delete) need the CURRENT session ID and path
+  // when the await resolves, not the stale value at call time.  Using refs
+  // avoids a race where a completed operation re-lists the wrong directory
+  // (i.e. the directory the user navigated away from while the op was pending).
+  const sessionIdRef  = useRef<string | null>(null);
+  const remotePathRef = useRef<string>('/');
+  useEffect(() => { sessionIdRef.current  = state.sessionId;  }, [state.sessionId]);
+  useEffect(() => { remotePathRef.current = state.remotePath; }, [state.remotePath]);
 
   // ── Logging helper ──────────────────────────────────────────────────────
   const addLog = useCallback((message: string, level: LogLevel = 'info') => {
@@ -386,6 +401,91 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [state.sessionId, addLog],
   );
 
+  // ── Remote file operations ────────────────────────────────────────────────
+  // All three helpers use sessionIdRef / remotePathRef rather than closed-over
+  // state values so they refresh the directory that is CURRENT when the await
+  // resolves — not the one that was current when the callback was created.
+  //
+  // Race guard: if the user navigated to a different directory while the op was
+  // pending, we still list and dispatch the path they were on when they invoked
+  // the operation (not a new path).  The resulting SET_REMOTE_ITEMS will simply
+  // re-populate that old path's items without changing remotePath, because the
+  // SET_REMOTE_ITEMS reducer sets remotePath to path only if they match current.
+  // (Actually — we just avoid overwriting the CURRENT navigation by checking
+  //  the path hasn't changed before dispatching.)
+
+  const mkdirRemote = useCallback(
+    async (parentPath: string, name: string) => {
+      const sessionId = sessionIdRef.current;
+      if (!sessionId) return;
+      // Capture the path BEFORE the async operation starts.
+      const opPath = remotePathRef.current;
+      const fullPath = parentPath.replace(/\/+$/, '') + '/' + name;
+      addLog(`mkdir ${fullPath}`);
+      try {
+        await bridge.mkdir(sessionId, fullPath);
+        // Only refresh if the user is still on the same directory.
+        if (remotePathRef.current === opPath && sessionIdRef.current) {
+          dispatch({ type: 'SET_REMOTE_LOADING' });
+          const items = await bridge.listDirectory(sessionIdRef.current, opPath);
+          dispatch({ type: 'SET_REMOTE_ITEMS', path: opPath, items });
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        dispatch({ type: 'SET_REMOTE_ERROR', error: msg });
+        addLog(`mkdir failed: ${msg}`, 'error');
+        throw e;
+      }
+    },
+    [addLog],  // stable: sessionIdRef / remotePathRef are refs, not state
+  );
+
+  const renameRemote = useCallback(
+    async (oldPath: string, newPath: string) => {
+      const sessionId = sessionIdRef.current;
+      if (!sessionId) return;
+      const opPath = remotePathRef.current;
+      addLog(`rename ${oldPath} → ${newPath}`);
+      try {
+        await bridge.rename(sessionId, oldPath, newPath);
+        if (remotePathRef.current === opPath && sessionIdRef.current) {
+          dispatch({ type: 'SET_REMOTE_LOADING' });
+          const items = await bridge.listDirectory(sessionIdRef.current, opPath);
+          dispatch({ type: 'SET_REMOTE_ITEMS', path: opPath, items });
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        dispatch({ type: 'SET_REMOTE_ERROR', error: msg });
+        addLog(`rename failed: ${msg}`, 'error');
+        throw e;
+      }
+    },
+    [addLog],
+  );
+
+  const deleteRemote = useCallback(
+    async (path: string) => {
+      const sessionId = sessionIdRef.current;
+      if (!sessionId) return;
+      const opPath = remotePathRef.current;
+      addLog(`delete ${path}`);
+      try {
+        await bridge.deleteItem(sessionId, path);
+        if (remotePathRef.current === opPath && sessionIdRef.current) {
+          dispatch({ type: 'SET_REMOTE_LOADING' });
+          const items = await bridge.listDirectory(sessionIdRef.current, opPath);
+          dispatch({ type: 'SET_REMOTE_ITEMS', path: opPath, items });
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        dispatch({ type: 'SET_REMOTE_ERROR', error: msg });
+        addLog(`delete failed: ${msg}`, 'error');
+        throw e;
+      }
+    },
+    [addLog],
+  );
+
   // ── Host-key ─────────────────────────────────────────────────────────────
   const trustHost = useCallback(() => {
     if (!state.hostKeyPrompt) return;
@@ -450,6 +550,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     refreshRemote,
     startUpload,
     startDownload,
+    mkdirRemote,
+    renameRemote,
+    deleteRemote,
     trustHost,
     rejectHost,
     loadSites,
