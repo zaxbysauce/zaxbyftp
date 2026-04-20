@@ -15,6 +15,7 @@ import React, {
 } from 'react';
 import * as bridge from '../api/bridge';
 import type {
+  CertPrompt,
   FileItem,
   HostKeyPrompt,
   InboundMessage,
@@ -58,6 +59,7 @@ interface AppState {
   transfers: TransferItem[];
   logs: LogEntry[];
   hostKeyPrompt: HostKeyPrompt | null;
+  certPrompt: CertPrompt | null;
   activeBottomTab: 'transfers' | 'log' | 'messages';
 }
 
@@ -77,6 +79,7 @@ const initialState: AppState = {
   transfers: [],
   logs: [],
   hostKeyPrompt: null,
+  certPrompt: null,
   activeBottomTab: 'transfers',
 };
 
@@ -98,6 +101,7 @@ type Action =
   | { type: 'UPDATE_TRANSFER'; partial: Partial<TransferItem> & { transferId: string } }
   | { type: 'ADD_LOG'; entry: LogEntry }
   | { type: 'SET_HOST_KEY_PROMPT'; prompt: HostKeyPrompt | null }
+  | { type: 'SET_CERT_PROMPT'; prompt: CertPrompt | null }
   | { type: 'SET_BOTTOM_TAB'; tab: AppState['activeBottomTab'] };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -176,6 +180,8 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case 'SET_HOST_KEY_PROMPT':
       return { ...state, hostKeyPrompt: action.prompt };
+    case 'SET_CERT_PROMPT':
+      return { ...state, certPrompt: action.prompt };
     case 'SET_BOTTOM_TAB':
       return { ...state, activeBottomTab: action.tab };
     default:
@@ -206,6 +212,8 @@ interface AppContextValue {
   deleteRemote: (path: string) => Promise<void>;
   trustHost: () => void;
   rejectHost: () => void;
+  trustCert: () => void;
+  rejectCert: () => void;
   loadSites: () => Promise<void>;
   saveSite: (site: Site) => Promise<void>;
   deleteSite: (name: string) => Promise<void>;
@@ -276,6 +284,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } else if (msg.type === 'hostKeyPrompt') {
         dispatch({
           type: 'SET_HOST_KEY_PROMPT',
+          prompt: { host: msg.host, fingerprint: msg.fingerprint },
+        });
+        dispatch({ type: 'SET_BOTTOM_TAB', tab: 'messages' });
+      } else if (msg.type === 'certPrompt') {
+        dispatch({
+          type: 'SET_CERT_PROMPT',
           prompt: { host: msg.host, fingerprint: msg.fingerprint },
         });
         dispatch({ type: 'SET_BOTTOM_TAB', tab: 'messages' });
@@ -502,6 +516,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'DISCONNECTED' });
   }, [state.hostKeyPrompt, addLog]);
 
+  // ── FTPS certificate ─────────────────────────────────────────────────────
+  const trustCert = useCallback(() => {
+    if (!state.certPrompt) return;
+    bridge.trustCert(state.certPrompt.host, state.certPrompt.fingerprint);
+    addLog(`Trusted FTPS certificate for ${state.certPrompt.host}`);
+    dispatch({ type: 'SET_CERT_PROMPT', prompt: null });
+  }, [state.certPrompt, addLog]);
+
+  const rejectCert = useCallback(() => {
+    if (!state.certPrompt) return;
+    bridge.rejectCert(state.certPrompt.fingerprint);
+    addLog(`Rejected FTPS certificate for ${state.certPrompt.host}`, 'warn');
+    dispatch({ type: 'SET_CERT_PROMPT', prompt: null });
+    dispatch({ type: 'DISCONNECTED' });
+  }, [state.certPrompt, addLog]);
+
   // ── Site manager ──────────────────────────────────────────────────────────
   const loadSites = useCallback(async () => {
     try {
@@ -555,6 +585,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     deleteRemote,
     trustHost,
     rejectHost,
+    trustCert,
+    rejectCert,
     loadSites,
     saveSite,
     deleteSite,

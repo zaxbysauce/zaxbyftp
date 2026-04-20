@@ -226,6 +226,16 @@ export function rejectHost(fingerprint: string): void {
   window.chrome.webview.postMessage(JSON.stringify({ action: 'rejectHost', fingerprint }));
 }
 
+/** Notify C# that the user trusted an FTPS certificate (stores to trusted_certs.json). */
+export function trustCert(host: string, fingerprint: string): void {
+  window.chrome.webview.postMessage(JSON.stringify({ action: 'trustCert', host, fingerprint }));
+}
+
+/** Notify C# that the user rejected an FTPS certificate (aborts connection). */
+export function rejectCert(fingerprint: string): void {
+  window.chrome.webview.postMessage(JSON.stringify({ action: 'rejectCert', fingerprint }));
+}
+
 /** Send a window chrome action (dragWindow / closeWindow / minimizeWindow / maximizeWindow). */
 export function windowAction(action: string): void {
   window.chrome.webview.postMessage(JSON.stringify({ action }));

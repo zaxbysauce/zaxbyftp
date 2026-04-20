@@ -53,9 +53,15 @@ export interface LogEntry {
   level: LogLevel;
 }
 
-// ── Host-key prompt ────────────────────────────────────────────────────────
+// ── Security prompts ───────────────────────────────────────────────────────
 
 export interface HostKeyPrompt {
+  host: string;
+  fingerprint: string;
+}
+
+/** FTPS certificate fingerprint prompt (first-use TOFU or unknown cert). */
+export interface CertPrompt {
   host: string;
   fingerprint: string;
 }
@@ -76,4 +82,5 @@ export type InboundMessage =
       status: string;
       message?: string;
     }
-  | { type: 'hostKeyPrompt'; host: string; fingerprint: string };
+  | { type: 'hostKeyPrompt'; host: string; fingerprint: string }
+  | { type: 'certPrompt'; host: string; fingerprint: string };

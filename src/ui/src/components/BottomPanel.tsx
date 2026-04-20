@@ -23,11 +23,11 @@ const TABS = [
 ];
 
 export function BottomPanel() {
-  const { state, setBottomTab, trustHost, rejectHost } = useApp();
-  const { activeBottomTab, hostKeyPrompt, transfers } = state;
+  const { state, setBottomTab, trustHost, rejectHost, trustCert, rejectCert } = useApp();
+  const { activeBottomTab, hostKeyPrompt, certPrompt, transfers } = state;
 
   const activeCount = transfers.filter(t => t.status === 'active').length;
-  const hasPrompt = !!hostKeyPrompt;
+  const hasPrompt = !!hostKeyPrompt || !!certPrompt;
 
   return (
     <div className="flex flex-col h-full bg-gray-900 border-t border-gray-700">
@@ -70,8 +70,11 @@ export function BottomPanel() {
         {activeBottomTab === 'messages' && (
           <MessagesPanel
             hostKeyPrompt={hostKeyPrompt}
-            onTrust={trustHost}
-            onReject={rejectHost}
+            certPrompt={certPrompt}
+            onTrustHost={trustHost}
+            onRejectHost={rejectHost}
+            onTrustCert={trustCert}
+            onRejectCert={rejectCert}
           />
         )}
       </div>
@@ -83,12 +86,22 @@ export function BottomPanel() {
 
 interface MessagesPanelProps {
   hostKeyPrompt: { host: string; fingerprint: string } | null;
-  onTrust: () => void;
-  onReject: () => void;
+  certPrompt: { host: string; fingerprint: string } | null;
+  onTrustHost: () => void;
+  onRejectHost: () => void;
+  onTrustCert: () => void;
+  onRejectCert: () => void;
 }
 
-function MessagesPanel({ hostKeyPrompt, onTrust, onReject }: MessagesPanelProps) {
-  if (!hostKeyPrompt) {
+function MessagesPanel({
+  hostKeyPrompt,
+  certPrompt,
+  onTrustHost,
+  onRejectHost,
+  onTrustCert,
+  onRejectCert,
+}: MessagesPanelProps) {
+  if (!hostKeyPrompt && !certPrompt) {
     return (
       <div className="flex items-center justify-center h-full text-xs text-gray-600">
         No pending messages
@@ -98,35 +111,73 @@ function MessagesPanel({ hostKeyPrompt, onTrust, onReject }: MessagesPanelProps)
 
   return (
     <div className="p-3 space-y-2 overflow-y-auto h-full">
-      <div className="flex items-start gap-3 p-3 rounded bg-yellow-900/20 border border-yellow-700/40">
-        <ShieldAlert size={20} className="text-yellow-400 flex-shrink-0 mt-0.5" />
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-yellow-300 mb-1">
-            Host Key Changed — {hostKeyPrompt.host}
-          </p>
-          <p className="text-xs text-gray-300 mb-1">
-            The server's SSH fingerprint has changed since your last connection.
-            This could indicate a man-in-the-middle attack.
-          </p>
-          <p className="text-xs font-mono text-gray-400 break-all mb-2">
-            {hostKeyPrompt.fingerprint}
-          </p>
-          <div className="flex gap-2">
-            <button
-              className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-green-700 hover:bg-green-600 text-white font-medium"
-              onClick={onTrust}
-            >
-              <CheckCircle size={12} /> Trust and Continue
-            </button>
-            <button
-              className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white font-medium"
-              onClick={onReject}
-            >
-              <XCircle size={12} /> Reject
-            </button>
+
+      {/* ── SSH host key mismatch ── */}
+      {hostKeyPrompt && (
+        <div className="flex items-start gap-3 p-3 rounded bg-yellow-900/20 border border-yellow-700/40">
+          <ShieldAlert size={20} className="text-yellow-400 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-yellow-300 mb-1">
+              Host Key Changed — {hostKeyPrompt.host}
+            </p>
+            <p className="text-xs text-gray-300 mb-1">
+              The server's SSH fingerprint has changed since your last connection.
+              This could indicate a man-in-the-middle attack.
+            </p>
+            <p className="text-xs font-mono text-gray-400 break-all mb-2">
+              {hostKeyPrompt.fingerprint}
+            </p>
+            <div className="flex gap-2">
+              <button
+                className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-green-700 hover:bg-green-600 text-white font-medium"
+                onClick={onTrustHost}
+              >
+                <CheckCircle size={12} /> Trust and Continue
+              </button>
+              <button
+                className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white font-medium"
+                onClick={onRejectHost}
+              >
+                <XCircle size={12} /> Reject
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* ── FTPS certificate prompt ── */}
+      {certPrompt && (
+        <div className="flex items-start gap-3 p-3 rounded bg-blue-900/20 border border-blue-700/40">
+          <ShieldAlert size={20} className="text-blue-400 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-blue-300 mb-1">
+              Untrusted FTPS Certificate — {certPrompt.host}
+            </p>
+            <p className="text-xs text-gray-300 mb-1">
+              The server presented a certificate that has not been seen before.
+              Verify the fingerprint with your server administrator before trusting.
+            </p>
+            <p className="text-xs font-mono text-gray-400 break-all mb-2">
+              SHA-256: {certPrompt.fingerprint}
+            </p>
+            <div className="flex gap-2">
+              <button
+                className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-green-700 hover:bg-green-600 text-white font-medium"
+                onClick={onTrustCert}
+              >
+                <CheckCircle size={12} /> Trust and Continue
+              </button>
+              <button
+                className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white font-medium"
+                onClick={onRejectCert}
+              >
+                <XCircle size={12} /> Reject
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
