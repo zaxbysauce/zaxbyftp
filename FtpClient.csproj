@@ -51,17 +51,53 @@
     <PackageReference Include="SSH.NET"     Version="2025.*" />
   </ItemGroup>
 
-  <!-- ── Embedded UI resources ─────────────────────────────────────────
-       LogicalName uses forward slashes so GetManifestResourceStream("ui/...")
-       works reliably without namespace-dot mangling.
+  <!-- ── React UI build + ZIP embed ───────────────────────────────────
+       BeforeTargets="CoreCompile" ensures the zip exists before the C#
+       compiler tries to embed it as a resource.
 
-       Phase 4: replace this single file with the full Vite output.
-       The recommended Phase 4 approach is a pre-build Target that runs
-       `npm run build` in src/ui and then glob-includes dist/** here.     -->
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\index.html">
-      <LogicalName>ui/index.html</LogicalName>
-    </EmbeddedResource>
-  </ItemGroup>
+       Set SkipUiBuild=true to bypass during CI or when the dist is
+       already up to date:
+         dotnet build -p:SkipUiBuild=true
+
+       The ZipDirectory task (built into MSBuild 15.8+) zips src/ui/dist
+       into src/ui/ui-bundle.zip which is then embedded with LogicalName
+       "ui-bundle.zip".  MainWindow.ExtractUiIfNeeded() extracts it via
+       System.IO.Compression.ZipArchive.                                  -->
+  <Target Name="BuildReactUi"
+          BeforeTargets="CoreCompile"
+          Condition="Exists('$(MSBuildProjectDirectory)\src\ui\package.json') AND '$(SkipUiBuild)' != 'true'">
+
+    <!-- npm.cmd is required on Windows; MSBuild Exec does not go through
+         a login shell so bare "npm" may not be resolved on PATH.         -->
+    <PropertyGroup>
+      <UiDir>$(MSBuildProjectDirectory)\src\ui</UiDir>
+      <UiBundleZip>$(UiDir)\ui-bundle.zip</UiBundleZip>
+    </PropertyGroup>
+
+    <Message Text="[FtpClient] npm ci — installing UI dependencies…" Importance="high" />
+    <Exec Command="npm.cmd ci"
+          WorkingDirectory="$(UiDir)"
+          ConsoleToMSBuild="true" />
+
+    <Message Text="[FtpClient] npm run build — compiling React/Vite UI…" Importance="high" />
+    <Exec Command="npm.cmd run build"
+          WorkingDirectory="$(UiDir)"
+          ConsoleToMSBuild="true" />
+
+    <!-- Zip the Vite output (dist/) into a single archive.
+         Overwrite=true handles incremental rebuilds.                      -->
+    <ZipDirectory SourceDirectory="$(UiDir)\dist"
+                  DestinationFile="$(UiBundleZip)"
+                  Overwrite="true" />
+
+    <!-- Dynamically add the ZIP as an embedded resource.                  -->
+    <ItemGroup>
+      <EmbeddedResource Include="$(UiBundleZip)">
+        <LogicalName>ui-bundle.zip</LogicalName>
+      </EmbeddedResource>
+    </ItemGroup>
+
+    <Message Text="[FtpClient] UI bundle embedded: $(UiBundleZip)" Importance="high" />
+  </Target>
 
 </Project>

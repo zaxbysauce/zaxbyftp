@@ -1,4 +1,5 @@
 using System.IO;
+using System.IO.Compression;
 using System.Reflection;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
@@ -91,22 +92,26 @@ public partial class MainWindow : Window
     }
 
     // ── Embedded resource extraction ────────────────────────────────────
-    //    Resources are embedded with LogicalName = "ui/<relative-path>"
-    //    (see FtpClient.csproj).  That preserves forward-slash separators
-    //    so GetManifestResourceNames() returns "ui/index.html" etc. without
-    //    the namespace-dot mangling that the default MSBuild naming applies.
+    //    The React/Vite build output is bundled into a single ZIP file
+    //    (LogicalName = "ui-bundle.zip") by the MSBuild BuildReactUi target
+    //    in FtpClient.csproj.  On first launch — or when the assembly version
+    //    changes — the ZIP is extracted to UiDir.
     //
-    //    Version check: assembly version is written to ui/.version on first
+    //    Version check: assembly version is written to ui/.version after
     //    extraction; subsequent launches skip extraction unless the version
-    //    string changes (i.e., a new build is run).
+    //    string changes (i.e., a new build was deployed).
+    //
+    //    Race note: if two instances launch simultaneously, one may fail
+    //    Directory.Delete with an IOException; the catch in OnWindowLoaded
+    //    surfaces a clear error rather than a silent partial-extract.
     private static void ExtractUiIfNeeded()
     {
         var assembly       = Assembly.GetExecutingAssembly();
         var currentVersion = assembly.GetName().Version?.ToString() ?? "0.0.0.0";
         var versionFile    = Path.Combine(UiDir, ".version");
 
-        // Defensive read: another process (e.g., a second instance launching
-        // simultaneously) may be writing the file. If reading fails we re-extract.
+        // Defensive read: another process may be writing the file.
+        // If reading fails we fall through and re-extract.
         try
         {
             if (File.Exists(versionFile) &&
@@ -121,37 +126,20 @@ public partial class MainWindow : Window
         }
 
         // Wipe stale UI files before extracting fresh ones.
-        // If two instances race here, one will fail Directory.Delete with an
-        // IOException; the catch in OnWindowLoaded will show a clear error rather
-        // than a silent partial-extract.
         if (Directory.Exists(UiDir))
             Directory.Delete(UiDir, recursive: true);
         Directory.CreateDirectory(UiDir);
 
-        const string Prefix = "ui/";
+        // Extract the bundled React app ZIP (LogicalName = "ui-bundle.zip").
+        using var zipStream = assembly.GetManifestResourceStream("ui-bundle.zip")
+                              ?? throw new InvalidOperationException(
+                                     "Embedded resource 'ui-bundle.zip' not found. " +
+                                     "Ensure the React UI was built before compiling " +
+                                     "(run 'npm run build' in src/ui, or build without " +
+                                     "-p:SkipUiBuild=true).");
 
-        foreach (var resourceName in assembly.GetManifestResourceNames())
-        {
-            if (!resourceName.StartsWith(Prefix, StringComparison.Ordinal))
-                continue;
-
-            // Strip the "ui/" prefix to get the relative path.
-            // Forward slashes in LogicalName are preserved as-is, so we
-            // normalise to the OS separator for Directory.CreateDirectory.
-            var relative = resourceName[Prefix.Length..]
-                               .Replace('/', Path.DirectorySeparatorChar);
-            var dest = Path.Combine(UiDir, relative);
-
-            var dir = Path.GetDirectoryName(dest);
-            if (!string.IsNullOrEmpty(dir))
-                Directory.CreateDirectory(dir);
-
-            using var src = assembly.GetManifestResourceStream(resourceName)
-                            ?? throw new InvalidOperationException(
-                                   $"Embedded resource '{resourceName}' not found.");
-            using var dst = File.Create(dest);
-            src.CopyTo(dst);
-        }
+        using var archive = new ZipArchive(zipStream, ZipArchiveMode.Read);
+        archive.ExtractToDirectory(UiDir, overwriteFiles: true);
 
         File.WriteAllText(versionFile, currentVersion);
     }
