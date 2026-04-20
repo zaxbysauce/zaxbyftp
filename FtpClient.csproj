@@ -1,0 +1,66 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>FtpClient</RootNamespace>
+    <AssemblyName>FtpClient</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+
+    <!-- ── Single-file publish ──────────────────────────────────────────
+         These only take effect on `dotnet publish`.
+         Normal `dotnet build` still produces a standard output.          -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+
+    <!-- Embed PDB into the single .exe so no .pdb sidecar is produced -->
+    <DebugType>embedded</DebugType>
+
+    <!-- Trim warnings: keep for now, revisit before Phase 5 -->
+    <TrimmerRootDescriptor></TrimmerRootDescriptor>
+  </PropertyGroup>
+
+  <!-- ── Strip XML documentation sidecars from publish output ──────────
+       WebView2 NuGet packages copy .xml intellisense files to the output
+       by default. This target removes them so the publish folder contains
+       only FtpClient.exe (the single-file bundle).                       -->
+  <Target Name="RemoveNuGetXmlDocs" AfterTargets="ResolveReferences">
+    <ItemGroup>
+      <ReferenceCopyLocalPaths Remove="@(ReferenceCopyLocalPaths)"
+                               Condition="'%(Extension)' == '.xml'" />
+    </ItemGroup>
+  </Target>
+
+  <!-- ── NuGet packages ─────────────────────────────────────────────── -->
+  <ItemGroup>
+    <!-- WebView2: evergreen runtime ships with Windows 11; handles Win 10 too -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.*" />
+
+    <!-- Phase 2 additions (commented until needed):
+    <PackageReference Include="FluentFTP"   Version="*" />
+    <PackageReference Include="SSH.NET"     Version="*" />
+    -->
+  </ItemGroup>
+
+  <!-- ── Embedded UI resources ─────────────────────────────────────────
+       LogicalName uses forward slashes so GetManifestResourceStream("ui/...")
+       works reliably without namespace-dot mangling.
+
+       Phase 4: replace this single file with the full Vite output.
+       The recommended Phase 4 approach is a pre-build Target that runs
+       `npm run build` in src/ui and then glob-includes dist/** here.     -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\index.html">
+      <LogicalName>ui/index.html</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>
