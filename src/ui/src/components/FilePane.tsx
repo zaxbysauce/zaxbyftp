@@ -256,7 +256,7 @@ export function FilePane({
       setColWidths(prev => ({ ...prev, [col]: Math.max(40, prev[col] - 10) }));
     } else if (e.key === 'ArrowRight') {
       e.preventDefault();
-      setColWidths(prev => ({ ...prev, [col]: prev[col] + 10 }));
+      setColWidths(prev => ({ ...prev, [col]: Math.min(500, prev[col] + 10) }));
     }
   };
 
@@ -269,7 +269,7 @@ export function FilePane({
     const onMove = (ev: MouseEvent) => {
       setColWidths(prev => ({
         ...prev,
-        [col]: Math.max(40, startW + (ev.clientX - startX)),
+        [col]: Math.min(500, Math.max(40, startW + (ev.clientX - startX))),
       }));
     };
     const onUp = () => {
