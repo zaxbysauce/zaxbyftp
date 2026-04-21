@@ -706,9 +706,12 @@ public sealed class AppBridge
                 case "dragWindow":
                     _dispatcher.InvokeAsync(() =>
                     {
-                        try { Application.Current.MainWindow?.DragMove(); }
-                        catch (InvalidOperationException) { /* maximized or not focused — ignore */ }
-                    });
+                        var mainWindow = Application.Current.MainWindow;
+                        if (mainWindow == null) return;
+                        var hwnd = new System.Windows.Interop.WindowInteropHelper(mainWindow).Handle;
+                        NativeMethods.ReleaseCapture();
+                        NativeMethods.SendMessage(hwnd, NativeMethods.WM_NCLBUTTONDOWN, (IntPtr)NativeMethods.HTCAPTION, IntPtr.Zero);
+                    }, System.Windows.Threading.DispatcherPriority.Send);
                     break;
 
                 case "closeWindow":
@@ -843,4 +846,16 @@ public sealed class AppBridge
             JsonSerializer.Serialize(sites,
                 new JsonSerializerOptions { WriteIndented = true }));
     }
+}
+
+internal static class NativeMethods
+{
+    internal const uint WM_NCLBUTTONDOWN = 0x00A1;
+    internal const int HTCAPTION = 0x02;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    internal static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    internal static extern bool ReleaseCapture();
 }

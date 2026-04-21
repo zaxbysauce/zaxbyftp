@@ -86,7 +86,7 @@ export function TopBar() {
 
   return (
     <div
-      className="flex items-center gap-2 px-2 py-1 bg-gray-900 border-b border-gray-700 select-none cursor-move"
+      className="flex items-center gap-2 px-2 py-1 bg-gray-800 border-b border-gray-600 select-none cursor-move"
       style={{ height: 44, minHeight: 44 }}
       onMouseDown={(e) => {
         // Drag window from the bar background (not from inputs/buttons).

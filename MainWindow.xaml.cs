@@ -38,6 +38,10 @@ public partial class MainWindow : Window
         System.ComponentModel.CancelEventArgs e)
     {
         _bridge?.CancelPendingPrompts();
+
+        // Dispose WebView2 to ensure the browser subprocess (msedgewebview2.exe) terminates.
+        // Without this, the process can linger in the background after the window closes.
+        WebView.Dispose();
     }
 
     // ── Window loaded: async WebView2 init ──────────────────────────────
@@ -107,15 +111,28 @@ public partial class MainWindow : Window
     private static void ExtractUiIfNeeded()
     {
         var assembly       = Assembly.GetExecutingAssembly();
-        var currentVersion = assembly.GetName().Version?.ToString() ?? "0.0.0.0";
         var versionFile    = Path.Combine(UiDir, ".version");
+
+        // Get the embedded ZIP and compute its content hash for cache invalidation.
+        using var zipStream = assembly.GetManifestResourceStream("ui-bundle.zip")
+                        ?? throw new InvalidOperationException(
+                               "Embedded resource 'ui-bundle.zip' not found.");
+
+        // Read the ZIP into a MemoryStream so we can both hash it and extract from it.
+        using var memStream = new MemoryStream();
+        zipStream.CopyTo(memStream);
+        var zipBytes = memStream.ToArray();
+
+        // SHA256 hash of the ZIP — any content change produces a different hash.
+        var hash = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(zipBytes));
 
         // Defensive read: another process may be writing the file.
         // If reading fails we fall through and re-extract.
         try
         {
             if (File.Exists(versionFile) &&
-                File.ReadAllText(versionFile).Trim() == currentVersion)
+                File.ReadAllText(versionFile).Trim() == hash)
             {
                 return; // Already up to date.
             }
@@ -130,17 +147,10 @@ public partial class MainWindow : Window
             Directory.Delete(UiDir, recursive: true);
         Directory.CreateDirectory(UiDir);
 
-        // Extract the bundled React app ZIP (LogicalName = "ui-bundle.zip").
-        using var zipStream = assembly.GetManifestResourceStream("ui-bundle.zip")
-                              ?? throw new InvalidOperationException(
-                                     "Embedded resource 'ui-bundle.zip' not found. " +
-                                     "Ensure the React UI was built before compiling " +
-                                     "(run 'npm run build' in src/ui, or build without " +
-                                     "-p:SkipUiBuild=true).");
-
-        using var archive = new ZipArchive(zipStream, ZipArchiveMode.Read);
+        // Extract from the in-memory copy.
+        using var archive = new ZipArchive(new MemoryStream(zipBytes), ZipArchiveMode.Read);
         archive.ExtractToDirectory(UiDir, overwriteFiles: true);
 
-        File.WriteAllText(versionFile, currentVersion);
+        File.WriteAllText(versionFile, hash);
     }
 }
