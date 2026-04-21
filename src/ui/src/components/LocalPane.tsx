@@ -82,6 +82,12 @@ export function LocalPane() {
       onDrop={handleDrop}
       isDragSource={isConnected}
       contextMenuItems={contextMenuItems}
+      onFileDoubleClick={(item) => {
+        if (state.connectionStatus === 'connected') {
+          const dest = state.remotePath.replace(/\/+$/, '') + '/' + item.name;
+          startUpload(item.fullPath, dest);
+        }
+      }}
     />
   );
 }

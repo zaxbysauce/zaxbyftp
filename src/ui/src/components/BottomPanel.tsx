@@ -54,7 +54,13 @@ export function BottomPanel() {
               <Icon size={12} />
               {label}
               {badge !== null && (
-                <span className="ml-0.5 px-1 py-0.5 rounded-full bg-blue-600 text-white text-[10px] leading-none">
+                <span
+                  className={`ml-0.5 px-1 py-0.5 rounded-full text-white text-[10px] leading-none ${
+                    key === 'messages' && hasPrompt
+                      ? 'bg-amber-600 animate-pulse'
+                      : 'bg-blue-600'
+                  }`}
+                >
                   {badge}
                 </span>
               )}
@@ -129,16 +135,16 @@ function MessagesPanel({
             </p>
             <div className="flex gap-2">
               <button
-                className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-green-700 hover:bg-green-600 text-white font-medium"
-                onClick={onTrustHost}
-              >
-                <CheckCircle size={12} /> Trust and Continue
-              </button>
-              <button
-                className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white font-medium"
+                className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-amber-700 hover:bg-amber-600 text-white font-medium"
                 onClick={onRejectHost}
               >
                 <XCircle size={12} /> Reject
+              </button>
+              <button
+                className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-500"
+                onClick={onTrustHost}
+              >
+                <CheckCircle size={12} /> Trust and Continue
               </button>
             </div>
           </div>
@@ -162,16 +168,16 @@ function MessagesPanel({
             </p>
             <div className="flex gap-2">
               <button
-                className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-green-700 hover:bg-green-600 text-white font-medium"
-                onClick={onTrustCert}
-              >
-                <CheckCircle size={12} /> Trust and Continue
-              </button>
-              <button
-                className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white font-medium"
+                className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-amber-700 hover:bg-amber-600 text-white font-medium"
                 onClick={onRejectCert}
               >
                 <XCircle size={12} /> Reject
+              </button>
+              <button
+                className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-500"
+                onClick={onTrustCert}
+              >
+                <CheckCircle size={12} /> Trust and Continue
               </button>
             </div>
           </div>

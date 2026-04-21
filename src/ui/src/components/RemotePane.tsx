@@ -14,6 +14,7 @@ import { useApp } from '../contexts/AppContext';
 import type { FileItem } from '../types';
 import type { ContextMenuAction } from './ContextMenu';
 import { FilePane } from './FilePane';
+import { ConfirmDialog } from './ConfirmDialog';
 
 // ── Modal helpers ────────────────────────────────────────────────────────────
 
@@ -105,6 +106,7 @@ export function RemotePane() {
   // Modal state
   const [mkdirOpen, setMkdirOpen]   = useState(false);
   const [renaming, setRenaming]     = useState<FileItem | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<FileItem | null>(null);
 
   // ── Navigation ──────────────────────────────────────────────────────────
   const handleNavigate = (item: FileItem) => {
@@ -162,13 +164,7 @@ export function RemotePane() {
       label: 'Delete',
       danger: true,
       onClick: () => {
-        if (
-          window.confirm(
-            `Delete "${item.name}"${item.isDirectory ? ' and all its contents' : ''}?`,
-          )
-        ) {
-          void deleteRemote(item.fullPath);
-        }
+        setPendingDelete(item);
       },
     });
 
@@ -218,6 +214,10 @@ export function RemotePane() {
         onPathChange={handlePathChange}
         onDrop={handleDrop}
         isDragSource
+        onFileDoubleClick={(item) => {
+          const dest = state.localPath.replace(/[/\\]+$/, '') + '\\' + item.name;
+          startDownload(item.fullPath, dest);
+        }}
         contextMenuItems={contextMenuItems}
         extraActions={
           <button
@@ -258,6 +258,23 @@ export function RemotePane() {
             await renameRemote(renaming.fullPath, newPath);
           }}
           onCancel={() => setRenaming(null)}
+        />
+      )}
+
+      {/* ── Delete confirmation ── */}
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Delete Item"
+          message={`Delete "${pendingDelete.name}"${
+            pendingDelete.isDirectory ? ' and all its contents' : ''
+          }? This cannot be undone.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => {
+            void deleteRemote(pendingDelete.fullPath);
+            setPendingDelete(null);
+          }}
+          onCancel={() => setPendingDelete(null)}
         />
       )}
     </>
