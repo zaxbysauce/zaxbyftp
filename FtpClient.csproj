@@ -1,0 +1,120 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Exclude test directories from compilation -->
+  <PropertyGroup>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="**/*.cs" Exclude="FtpClient.Tests/**/*.cs;**/obj/**;**/bin/**" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- windows10.0.17763.0 (= Win10 1809) enables WinRT APIs (PasswordVault etc.)
+         without any extra NuGet package. Min target is reasonable for Win10/11. -->
+    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>FtpClient</RootNamespace>
+    <AssemblyName>FtpClient</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyVersion>1.0.1.0</AssemblyVersion>
+    <FileVersion>1.0.1.0</FileVersion>
+
+    <!-- ── Single-file publish ──────────────────────────────────────────
+         These only take effect on `dotnet publish`.
+         Normal `dotnet build` still produces a standard output.          -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+
+    <!-- Embed PDB into the single .exe so no .pdb sidecar is produced -->
+    <DebugType>embedded</DebugType>
+
+    <!-- Trim warnings: keep for now, revisit before Phase 5 -->
+    <TrimmerRootDescriptor></TrimmerRootDescriptor>
+  </PropertyGroup>
+
+  <!-- ── Strip XML documentation sidecars from publish output ──────────
+       WebView2 NuGet packages copy .xml intellisense files to the output
+       by default. This target removes them so the publish folder contains
+       only FtpClient.exe (the single-file bundle).                       -->
+  <Target Name="RemoveNuGetXmlDocs" AfterTargets="ResolveReferences">
+    <ItemGroup>
+      <ReferenceCopyLocalPaths Remove="@(ReferenceCopyLocalPaths)"
+                               Condition="'%(Extension)' == '.xml'" />
+    </ItemGroup>
+  </Target>
+
+  <!-- ── NuGet packages ─────────────────────────────────────────────── -->
+  <ItemGroup>
+    <!-- WebView2: evergreen runtime ships with Windows 11; handles Win 10 too -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.*" />
+    <!-- FTP / FTPS adapter -->
+    <PackageReference Include="FluentFTP"   Version="54.*" />
+    <!-- SFTP adapter -->
+    <PackageReference Include="SSH.NET"     Version="2025.*" />
+  </ItemGroup>
+
+  <!-- ── React UI build + ZIP embed ───────────────────────────────────
+       The UI bundle is embedded in TWO independent steps so that
+       -p:SkipUiBuild=true (used for incremental .NET-only rebuilds) still
+       produces a working binary:
+
+       Step 1 — BUILD (skippable):
+         The BuildReactUi target runs `npm ci` + `npm run build` + ZipDirectory
+         to produce src/ui/ui-bundle.zip.  Skip it when dist is already current:
+           dotnet build -p:SkipUiBuild=true
+
+       Step 2 — EMBED (always active):
+         A static ItemGroup embeds whatever ui-bundle.zip is on disk.  This
+         means the zip produced in a previous full build is re-embedded on
+         subsequent SkipUiBuild=true builds — no stale-binary problem.
+
+       MainWindow.ExtractUiIfNeeded() extracts it at runtime via
+       System.IO.Compression.ZipArchive.                                  -->
+
+  <!-- Global properties so the path is consistent inside and outside the target. -->
+  <PropertyGroup>
+    <UiDir>$(MSBuildProjectDirectory)\src\ui</UiDir>
+    <UiBundleZip>$(UiDir)\ui-bundle.zip</UiBundleZip>
+  </PropertyGroup>
+
+  <!-- Always embed the ZIP if it exists on disk (produced by a prior full build
+       or by the BuildReactUi target in this same invocation).             -->
+  <ItemGroup Condition="Exists('$(UiBundleZip)')">
+    <EmbeddedResource Include="$(UiBundleZip)">
+      <LogicalName>ui-bundle.zip</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <Target Name="BuildReactUi"
+          BeforeTargets="CoreCompile"
+          Condition="Exists('$(MSBuildProjectDirectory)\src\ui\package.json') AND '$(SkipUiBuild)' != 'true'">
+
+    <!-- npm.cmd is required on Windows; MSBuild Exec does not go through
+         a login shell so bare "npm" may not be resolved on PATH.         -->
+    <Message Text="[FtpClient] npm ci — installing UI dependencies…" Importance="high" />
+    <Exec Command="npm.cmd ci"
+          WorkingDirectory="$(UiDir)"
+          ConsoleToMSBuild="true" />
+
+    <Message Text="[FtpClient] npm run build — compiling React/Vite UI…" Importance="high" />
+    <Exec Command="npm.cmd run build"
+          WorkingDirectory="$(UiDir)"
+          ConsoleToMSBuild="true" />
+
+    <!-- Zip the Vite output (dist/) into a single archive.
+         Overwrite=true handles incremental rebuilds.                      -->
+    <ZipDirectory SourceDirectory="$(UiDir)\dist"
+                  DestinationFile="$(UiBundleZip)"
+                  Overwrite="true" />
+
+    <Message Text="[FtpClient] UI bundle ready: $(UiBundleZip)" Importance="high" />
+  </Target>
+
+</Project>
