@@ -37,6 +37,7 @@ declare global {
     // Synchronous string-returning methods — still await the COM dispatch.
     ListLocalDirectory(path: string): Promise<string>;
     GetSavedSites(): Promise<string>;
+    GetUserProfilePath(): Promise<string>;
   }
 }
 

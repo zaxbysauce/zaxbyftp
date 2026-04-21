@@ -21,6 +21,14 @@ namespace FtpClient.Tests;
 public class AppBridgeSaveSiteTests
 {
     // ═══════════════════════════════════════════════════════════════════════════
+    //  Static helper: resolves AppBridge.cs path relative to test assembly
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static readonly string AppBridgeSourcePath = Path.Combine(
+        AppDomain.CurrentDomain.BaseDirectory,
+        "..", "..", "..", "..", "AppBridge.cs");
+
+    // ═══════════════════════════════════════════════════════════════════════════
     //  Test helper: replicates the error message from SaveSite catch block
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -114,7 +122,7 @@ public class AppBridgeSaveSiteTests
     public void SaveSite_CatchBlock_Exists()
     {
         // Read the source code and verify SaveSite has a catch block
-        var appBridgeSource = File.ReadAllText(@"C:\opencode\zaxbyftp\AppBridge.cs");
+        var appBridgeSource = File.ReadAllText(AppBridgeSourcePath);
 
         // Find the SaveSite method
         var saveSiteStart = appBridgeSource.IndexOf("public void SaveSite");
@@ -134,7 +142,7 @@ public class AppBridgeSaveSiteTests
     public void SaveSite_CatchBlock_PostsSiteSaveError()
     {
         // Verify the catch block posts siteSaveError message
-        var appBridgeSource = File.ReadAllText(@"C:\opencode\zaxbyftp\AppBridge.cs");
+        var appBridgeSource = File.ReadAllText(AppBridgeSourcePath);
 
         var saveSiteStart = appBridgeSource.IndexOf("public void SaveSite");
         var catchBlockStart = appBridgeSource.IndexOf("catch", saveSiteStart);
@@ -153,7 +161,7 @@ public class AppBridgeSaveSiteTests
     public void SaveSite_CatchBlock_UsesGenericMessage()
     {
         // Verify the catch block uses the generic message, not ex.Message
-        var appBridgeSource = File.ReadAllText(@"C:\opencode\zaxbyftp\AppBridge.cs");
+        var appBridgeSource = File.ReadAllText(AppBridgeSourcePath);
 
         var saveSiteStart = appBridgeSource.IndexOf("public void SaveSite");
         var catchBlockStart = appBridgeSource.IndexOf("catch", saveSiteStart);
@@ -172,7 +180,7 @@ public class AppBridgeSaveSiteTests
     public void SaveSite_CatchBlock_DoesNotLeakExceptionDetails()
     {
         // Verify the catch block uses a generic message, not exception variable
-        var appBridgeSource = File.ReadAllText(@"C:\opencode\zaxbyftp\AppBridge.cs");
+        var appBridgeSource = File.ReadAllText(AppBridgeSourcePath);
 
         var saveSiteStart = appBridgeSource.IndexOf("public void SaveSite");
         var catchBlockStart = appBridgeSource.IndexOf("catch", saveSiteStart);
@@ -194,7 +202,7 @@ public class AppBridgeSaveSiteTests
     public void SaveSite_InvalidJson_DoesNotThrow()
     {
         // Verify that the catch block exists to handle JSON parse errors
-        var appBridgeSource = File.ReadAllText(@"C:\opencode\zaxbyftp\AppBridge.cs");
+        var appBridgeSource = File.ReadAllText(AppBridgeSourcePath);
 
         // JSON parsing happens via JsonNode.Parse which throws JsonException
         // The catch block catches all exceptions including JsonException
@@ -209,7 +217,7 @@ public class AppBridgeSaveSiteTests
     public void SaveSite_MissingName_IsValidated()
     {
         // Verify that SaveSite validates the 'name' field exists
-        var appBridgeSource = File.ReadAllText(@"C:\opencode\zaxbyftp\AppBridge.cs");
+        var appBridgeSource = File.ReadAllText(AppBridgeSourcePath);
 
         // The validation "Site must have a 'name'" happens inside the try block
         Assert.Contains("Site must have a 'name'", appBridgeSource);
@@ -273,7 +281,7 @@ public class AppBridgeSaveSiteTests
     public void SaveSite_HasTryBlock()
     {
         // Verify SaveSite has a try block for normal operation
-        var appBridgeSource = File.ReadAllText(@"C:\opencode\zaxbyftp\AppBridge.cs");
+        var appBridgeSource = File.ReadAllText(AppBridgeSourcePath);
 
         var saveSiteStart = appBridgeSource.IndexOf("public void SaveSite");
         var tryBlockStart = appBridgeSource.IndexOf("try", saveSiteStart);
@@ -289,7 +297,7 @@ public class AppBridgeSaveSiteTests
     public void SaveSite_NormalPath_UpdatesSitesFile()
     {
         // Verify the normal path calls SaveSitesToDisk
-        var appBridgeSource = File.ReadAllText(@"C:\opencode\zaxbyftp\AppBridge.cs");
+        var appBridgeSource = File.ReadAllText(AppBridgeSourcePath);
 
         var saveSiteStart = appBridgeSource.IndexOf("public void SaveSite");
         // Find the catch that closes the outer try block - it comes after SaveSitesToDisk
@@ -311,7 +319,7 @@ public class AppBridgeSaveSiteTests
     public void SaveSite_PasswordHandling_RemovesPasswordFromNode()
     {
         // Verify that password is removed from the JSON node before saving
-        var appBridgeSource = File.ReadAllText(@"C:\opencode\zaxbyftp\AppBridge.cs");
+        var appBridgeSource = File.ReadAllText(AppBridgeSourcePath);
 
         var saveSiteStart = appBridgeSource.IndexOf("public void SaveSite");
         // Find the outer catch block

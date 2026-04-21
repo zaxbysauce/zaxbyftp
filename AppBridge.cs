@@ -141,6 +141,24 @@ public sealed class AppBridge
     private const string VaultResource = "FtpClient";
     private static readonly PasswordVault _vault = new();
 
+    // ── Origin validation ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Validates that a message source URI originates from the expected host (ftpclient.local).
+    /// Returns null if valid, or an error description if invalid.
+    /// </summary>
+    private static string? ValidateOrigin(string? sourceUri)
+    {
+        if (string.IsNullOrEmpty(sourceUri))
+            return "null or empty";
+
+        if (!Uri.TryCreate(sourceUri, UriKind.Absolute, out var uri) ||
+            !uri.Host.Equals("ftpclient.local", StringComparison.OrdinalIgnoreCase))
+            return sourceUri;
+
+        return null;
+    }
+
     // ── JSON options ─────────────────────────────────────────────────────────
     private static readonly JsonSerializerOptions _json =
         new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -639,17 +657,10 @@ public sealed class AppBridge
         catch { return; }
 
         // Origin validation: reject messages from unexpected hosts
-        var sourceUri = e.Source;  // string
-        if (string.IsNullOrEmpty(sourceUri))
+        var originError = ValidateOrigin(e.Source);
+        if (originError is not null)
         {
-            Console.Error.WriteLine("[AppBridge] Rejected message from unexpected origin: null");
-            return;
-        }
-
-        if (!Uri.TryCreate(sourceUri, UriKind.Absolute, out var uri) ||
-            !uri.Host.Equals("ftpclient.local", StringComparison.OrdinalIgnoreCase))
-        {
-            Console.Error.WriteLine($"[AppBridge] Rejected message from unexpected origin: {sourceUri}");
+            Console.Error.WriteLine($"[AppBridge] Rejected message from unexpected origin: {originError}");
             return;
         }
 
@@ -761,6 +772,14 @@ public sealed class AppBridge
             _core.PostWebMessageAsJson(json);
         else
             _dispatcher.InvokeAsync(() => _core.PostWebMessageAsJson(json));
+    }
+
+    /// <summary>
+    /// Returns the user profile path for use as a safe default local directory.
+    /// </summary>
+    public string GetUserProfilePath()
+    {
+        return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     }
 
     // ── Trusted FTPS certificates ─────────────────────────────────────────

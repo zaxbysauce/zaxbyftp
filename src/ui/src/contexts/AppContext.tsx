@@ -67,7 +67,7 @@ const initialState: AppState = {
   sessionId: null,
   connectionStatus: 'disconnected',
   connectionError: null,
-  localPath: 'C:\\',
+  localPath: '',
   localItems: [],
   localLoading: false,
   localError: null,
@@ -293,6 +293,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           prompt: { host: msg.host, fingerprint: msg.fingerprint },
         });
         dispatch({ type: 'SET_BOTTOM_TAB', tab: 'messages' });
+      } else if (msg.type === 'siteSaveError') {
+        addLog(msg.message ?? 'Failed to save site', 'error');
       }
     });
     return remove;
@@ -567,7 +569,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // ── Bootstrap ─────────────────────────────────────────────────────────────
   useEffect(() => {
     void loadSites();
-    void navigateLocal('C:\\');
+    void (async () => {
+      try {
+        void navigateLocal(await bridge.getUserProfilePath());
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        addLog(`Failed to initialize local directory: ${msg}`, 'error');
+      }
+    })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const value: AppContextValue = {

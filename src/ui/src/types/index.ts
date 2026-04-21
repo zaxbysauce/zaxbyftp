@@ -83,4 +83,6 @@ export type InboundMessage =
       message?: string;
     }
   | { type: 'hostKeyPrompt'; host: string; fingerprint: string }
-  | { type: 'certPrompt'; host: string; fingerprint: string };
+  | { type: 'certPrompt'; host: string; fingerprint: string }
+  | { type: 'siteSaveError'; message: string }
+  | { type: 'hostKeyTrusted'; host: string; fingerprint: string };

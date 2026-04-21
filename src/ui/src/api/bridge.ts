@@ -163,6 +163,12 @@ export async function listLocalDirectory(path: string): Promise<FileItem[]> {
   return invokeDirect<FileItem[]>('ListLocalDirectory', path);
 }
 
+/** Get the user profile path from the host (safe default for local browsing). */
+export async function getUserProfilePath(): Promise<string> {
+  const raw = await getApi().GetUserProfilePath();
+  return typeof raw === 'string' ? raw : '';
+}
+
 /** Start an upload; progress events arrive via addGlobalListener. */
 export function startUpload(
   sessionId: string,
