@@ -85,14 +85,16 @@ function TransferRow({ t, onRemove }: { t: TransferItem; onRemove: (id: string) 
                 : `${pct.toFixed(0)}%`}
         </span>
 
-        {/* Dismiss button — visible on row hover */}
-        <button
-          onClick={() => onRemove(t.transferId)}
-          title="Dismiss transfer"
-          className="flex-shrink-0 p-0.5 rounded text-gray-600 hover:text-gray-300 hover:bg-gray-700 opacity-0 group-hover:opacity-100 transition-opacity"
-        >
-          <X size={10} />
-        </button>
+        {/* Dismiss button — visible on row hover; hidden while transfer is active */}
+        {!isActive && (
+          <button
+            onClick={() => onRemove(t.transferId)}
+            title="Dismiss transfer"
+            className="flex-shrink-0 p-0.5 rounded text-gray-600 hover:text-gray-300 hover:bg-gray-700 opacity-0 group-hover:opacity-100 transition-opacity"
+          >
+            <X size={10} />
+          </button>
+        )}
       </div>
 
       {/* Progress bar */}

@@ -372,7 +372,7 @@ export function FilePane({
               idAccessor="id"
               childrenAccessor={() => null}
               height={treeHeight}
-              rowHeight={22}
+              rowHeight={24}
               indent={0}
               // Disable react-arborist's internal DnD; we use native HTML5 DnD.
               disableDrag

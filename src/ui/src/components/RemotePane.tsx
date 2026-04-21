@@ -214,7 +214,10 @@ export function RemotePane() {
         onPathChange={handlePathChange}
         onDrop={handleDrop}
         isDragSource
-        onFileDoubleClick={(item) => startDownload(item.fullPath, state.localPath)}
+        onFileDoubleClick={(item) => {
+          const dest = state.localPath.replace(/[/\\]+$/, '') + '\\' + item.name;
+          startDownload(item.fullPath, dest);
+        }}
         contextMenuItems={contextMenuItems}
         extraActions={
           <button

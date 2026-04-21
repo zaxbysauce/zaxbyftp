@@ -84,7 +84,8 @@ export function LocalPane() {
       contextMenuItems={contextMenuItems}
       onFileDoubleClick={(item) => {
         if (state.connectionStatus === 'connected') {
-          startUpload(item.fullPath, state.remotePath);
+          const dest = state.remotePath.replace(/\/+$/, '') + '/' + item.name;
+          startUpload(item.fullPath, dest);
         }
       }}
     />
