@@ -86,7 +86,7 @@ export function TopBar() {
 
   return (
     <div
-      className="flex items-center gap-2 px-2 py-1 bg-gray-900 border-b border-gray-700 select-none"
+      className="flex items-center gap-2 px-2 py-1 bg-gray-900 border-b border-gray-700 select-none cursor-move"
       style={{ height: 44, minHeight: 44 }}
       onMouseDown={(e) => {
         // Drag window from the bar background (not from inputs/buttons).
@@ -129,9 +129,9 @@ export function TopBar() {
         )}
       </div>
 
-      {/* QuickConnect form */}
+      {/* QuickConnect form — overflow-hidden keeps inputs from spilling over the chrome buttons */}
       <form
-        className="flex items-center gap-1 flex-1 min-w-0"
+        className="flex items-center gap-1 flex-1 min-w-0 overflow-hidden cursor-default"
         onSubmit={handleConnect}
       >
         <input
@@ -215,24 +215,24 @@ export function TopBar() {
         <span className="text-xs text-green-400 flex-shrink-0">Connected</span>
       )}
 
-      {/* Window chrome buttons */}
-      <div className="flex items-center gap-0.5 ml-2 flex-shrink-0">
+      {/* Window chrome buttons — separated from toolbar, always flex-shrink-0 so they stay visible */}
+      <div className="flex items-center gap-0.5 border-l border-gray-700 pl-2 ml-1 flex-shrink-0 cursor-default">
         <button
-          className="p-1.5 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-100"
+          className="p-1.5 rounded hover:bg-gray-700 text-gray-300 hover:text-white transition-colors"
           onClick={() => windowAction('minimizeWindow')}
           title="Minimize"
         >
           <Minus size={12} />
         </button>
         <button
-          className="p-1.5 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-100"
+          className="p-1.5 rounded hover:bg-gray-700 text-gray-300 hover:text-white transition-colors"
           onClick={() => windowAction('maximizeWindow')}
           title="Maximize / Restore"
         >
           <Maximize2 size={12} />
         </button>
         <button
-          className="p-1.5 rounded hover:bg-red-600 text-gray-400 hover:text-white"
+          className="p-1.5 rounded text-gray-300 hover:bg-red-600 hover:text-white transition-colors"
           onClick={() => windowAction('closeWindow')}
           title="Close"
         >
