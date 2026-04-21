@@ -28,7 +28,8 @@ import React, {
 } from 'react';
 import { Tree } from 'react-arborist';
 import type { NodeRendererProps } from 'react-arborist';
-import { ArrowUp, File, Folder, Loader2, RefreshCw } from 'lucide-react';
+import { ArrowUp, Loader2, RefreshCw } from 'lucide-react';
+import { getFileIcon, FOLDER_ICON } from '../utils/fileIcons';
 import type { FileItem } from '../types';
 import type { ContextMenuAction } from './ContextMenu';
 import { ContextMenu } from './ContextMenu';
@@ -92,7 +93,7 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<TreeNode>) {
     <div
       ref={dragHandle}
       style={style}
-      className={`file-row ${node.isSelected ? 'selected' : ''} ${node.isFocused ? 'focused' : ''}`}
+      className={`file-row ${node.isSelected ? 'selected' : ''} ${node.isFocused ? 'focused' : ''} ${isDragSource && !item.isDirectory ? 'cursor-grab active:cursor-grabbing' : ''}`}
       // ── Native HTML5 drag source ──────────────────────────────────────
       draggable={isDragSource && !item.isDirectory}
       onDragStart={(e) => {
@@ -111,9 +112,12 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<TreeNode>) {
     >
       {/* Icon + name */}
       <div className={`${COL_NAME} flex items-center gap-1 overflow-hidden`}>
-        {item.isDirectory
-          ? <Folder size={13} className="text-yellow-400 flex-shrink-0" />
-          : <File    size={13} className="text-gray-400  flex-shrink-0" />}
+        {(() => {
+          const { icon: FileIcon, color } = item.isDirectory
+            ? FOLDER_ICON
+            : getFileIcon(item.name);
+          return <FileIcon size={13} className={`${color} flex-shrink-0`} />;
+        })()}
         <span className="truncate text-gray-100 text-xs">{item.name}</span>
       </div>
       {/* Size */}
@@ -148,6 +152,8 @@ export interface FilePaneProps {
   error: string | null;
   /** Called when the user activates (double-clicks) a directory row. */
   onNavigate: (item: FileItem) => void;
+  /** Called when the user double-clicks (or presses Enter on) a non-directory file. */
+  onFileDoubleClick?: (item: FileItem) => void;
   /** Called when the user navigates up or refreshes.  Path arg = target path. */
   onPathChange: (path: string) => void;
   /**
@@ -173,6 +179,7 @@ export function FilePane({
   loading,
   error,
   onNavigate,
+  onFileDoubleClick,
   onPathChange,
   onDrop,
   isDragSource = false,
@@ -180,6 +187,8 @@ export function FilePane({
   extraActions,
 }: FilePaneProps) {
   const [treeHeight, setTreeHeight] = useState(300);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<FileItem | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
 
   // Context menu state
@@ -234,16 +243,24 @@ export function FilePane({
     if (!raw) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    // Only clear if leaving the pane entirely, not entering a child element
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragOver(false);
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
+    setIsDragOver(false);
     if (!onDrop) return;
     e.preventDefault();
     const raw = e.dataTransfer.getData('application/ftp-items');
     if (!raw) return;
     try {
       const payload = JSON.parse(raw) as { pane: string; items: FileItem[] };
-      // Ignore drops from the same pane (can't upload to yourself, etc.)
       if (payload.pane === paneId) return;
       onDrop(payload.items, path);
     } catch { /* ignore malformed payload */ }
@@ -262,8 +279,11 @@ export function FilePane({
       }}
     >
       <div
-        className="flex flex-col h-full bg-gray-900 border border-gray-700 rounded overflow-hidden"
+        className={`flex flex-col h-full bg-gray-900 border rounded overflow-hidden transition-colors ${
+          isDragOver ? 'file-pane-drop-active' : 'border-gray-700'
+        }`}
         onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
         {/* ── Header ── */}
@@ -313,7 +333,31 @@ export function FilePane({
         )}
 
         {/* ── Tree / empty state ── */}
-        <div ref={treeContainerRef} className="flex-1 overflow-hidden">
+        <div
+          ref={treeContainerRef}
+          className="flex-1 overflow-hidden outline-none"
+          tabIndex={0}
+          onKeyDown={(e: React.KeyboardEvent) => {
+            // Don't steal shortcuts from input fields
+            if ((e.target as HTMLElement).matches('input, textarea, select')) return;
+            if (e.key === 'F5') {
+              e.preventDefault();
+              onPathChange(path);
+            }
+            if (e.key === 'Backspace') {
+              e.preventDefault();
+              goUp();
+            }
+            if (selectedItem && e.key === 'Enter') {
+              e.preventDefault();
+              if (selectedItem.isDirectory) {
+                onNavigate(selectedItem);
+              } else {
+                onFileDoubleClick?.(selectedItem);
+              }
+            }
+          }}
+        >
           {loading && items.length === 0 ? (
             <div className="flex items-center justify-center h-full text-gray-500 text-xs">
               <Loader2 size={16} className="animate-spin mr-2" /> Loading…
@@ -333,8 +377,13 @@ export function FilePane({
               // Disable react-arborist's internal DnD; we use native HTML5 DnD.
               disableDrag
               disableDrop
+              onSelect={(nodes) => setSelectedItem(nodes[0]?.data ?? null)}
               onActivate={(node) => {
-                if (node.data.isDirectory) onNavigate(node.data);
+                if (node.data.isDirectory) {
+                  onNavigate(node.data);
+                } else {
+                  onFileDoubleClick?.(node.data);
+                }
               }}
             >
               {NodeRow}

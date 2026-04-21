@@ -102,7 +102,9 @@ type Action =
   | { type: 'ADD_LOG'; entry: LogEntry }
   | { type: 'SET_HOST_KEY_PROMPT'; prompt: HostKeyPrompt | null }
   | { type: 'SET_CERT_PROMPT'; prompt: CertPrompt | null }
-  | { type: 'SET_BOTTOM_TAB'; tab: AppState['activeBottomTab'] };
+  | { type: 'SET_BOTTOM_TAB'; tab: AppState['activeBottomTab'] }
+  | { type: 'REMOVE_TRANSFER'; transferId: string }
+  | { type: 'CLEAR_COMPLETED' };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -184,6 +186,20 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, certPrompt: action.prompt };
     case 'SET_BOTTOM_TAB':
       return { ...state, activeBottomTab: action.tab };
+    case 'REMOVE_TRANSFER':
+      return {
+        ...state,
+        transfers: state.transfers.filter(t => t.transferId !== action.transferId),
+      };
+    case 'CLEAR_COMPLETED':
+      // Only remove transfers with terminal status (complete or error).
+      // Keep pending and active transfers in the queue.
+      return {
+        ...state,
+        transfers: state.transfers.filter(
+          t => t.status === 'active' || t.status === 'pending',
+        ),
+      };
     default:
       return state;
   }
@@ -218,6 +234,8 @@ interface AppContextValue {
   saveSite: (site: Site) => Promise<void>;
   deleteSite: (name: string) => Promise<void>;
   setBottomTab: (tab: AppState['activeBottomTab']) => void;
+  removeTransfer: (transferId: string) => void;
+  clearCompleted: () => void;
   addLog: (message: string, level?: LogLevel) => void;
 }
 
@@ -566,6 +584,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  const removeTransfer = useCallback(
+    (transferId: string) => dispatch({ type: 'REMOVE_TRANSFER', transferId }),
+    [],
+  );
+
+  const clearCompleted = useCallback(
+    () => dispatch({ type: 'CLEAR_COMPLETED' }),
+    [],
+  );
+
   // ── Bootstrap ─────────────────────────────────────────────────────────────
   useEffect(() => {
     void loadSites();
@@ -600,6 +628,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     saveSite,
     deleteSite,
     setBottomTab,
+    removeTransfer,
+    clearCompleted,
     addLog,
   };
 
