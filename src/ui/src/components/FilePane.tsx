@@ -40,20 +40,44 @@ interface PaneCtxValue {
   isDragSource: boolean;
   paneId: 'local' | 'remote';
   onContextMenuRequest: (item: FileItem, x: number, y: number) => void;
+  colWidths: { size: number; type: number; date: number };
 }
 
 const PaneCtx = createContext<PaneCtxValue>({
   isDragSource: false,
   paneId: 'local',
   onContextMenuRequest: () => { /* no-op */ },
+  colWidths: { size: 80, type: 56, date: 128 },
 });
 
-// ── Column definitions ───────────────────────────────────────────────────────
+// ── Column resize handle ─────────────────────────────────────────────────────
 
-const COL_NAME = 'flex-1 min-w-0';
-const COL_SIZE = 'w-20 text-right flex-shrink-0';
-const COL_TYPE = 'w-14 flex-shrink-0';
-const COL_DATE = 'w-32 flex-shrink-0';
+function ColResizeHandle({
+  onMouseDown,
+  onKeyDown,
+  label,
+  currentWidth,
+}: {
+  onMouseDown: (e: React.MouseEvent) => void;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+  label: string;
+  currentWidth: number;
+}) {
+  return (
+    <div
+      role="separator"
+      aria-label={`Resize ${label} column`}
+      aria-orientation="vertical"
+      aria-valuenow={currentWidth}
+      aria-valuemin={40}
+      aria-valuemax={500}
+      tabIndex={0}
+      className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 focus:bg-blue-500 focus:outline-none z-10"
+      onMouseDown={onMouseDown}
+      onKeyDown={onKeyDown}
+    />
+  );
+}
 
 function formatSize(n: number): string {
   if (n < 0) return '';
@@ -86,7 +110,7 @@ interface TreeNode extends FileItem {
 // ── Row renderer ─────────────────────────────────────────────────────────────
 
 function NodeRow({ node, style, dragHandle }: NodeRendererProps<TreeNode>) {
-  const { isDragSource, paneId, onContextMenuRequest } = useContext(PaneCtx);
+  const { isDragSource, paneId, onContextMenuRequest, colWidths } = useContext(PaneCtx);
   const item = node.data;
 
   return (
@@ -110,22 +134,22 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<TreeNode>) {
         onContextMenuRequest(item, e.clientX, e.clientY);
       }}
     >
-      {/* Icon + name */}
-      <div className={`${COL_NAME} flex items-center gap-1 overflow-hidden`}>
+      {/* Icon + name — minimum 100px so it never collapses to a single letter */}
+      <div style={{ flex: 1, minWidth: 100, overflow: 'hidden' }} className="flex items-center gap-1">
         {(() => {
           const { icon: FileIcon, color } = item.isDirectory
             ? FOLDER_ICON
             : getFileIcon(item.name);
           return <FileIcon size={13} className={`${color} flex-shrink-0`} />;
         })()}
-        <span className="truncate text-gray-100 text-xs">{item.name}</span>
+        <span className="truncate text-gray-100 text-xs" title={item.name}>{item.name}</span>
       </div>
       {/* Size */}
-      <div className={`${COL_SIZE} text-xs text-gray-400`}>
+      <div style={{ width: colWidths.size, flexShrink: 0 }} className="text-xs text-gray-400 text-right">
         {formatSize(item.size)}
       </div>
       {/* Type */}
-      <div className={`${COL_TYPE} text-xs text-gray-500 truncate pl-1`}>
+      <div style={{ width: colWidths.type, flexShrink: 0 }} className="text-xs text-gray-500 truncate pl-1">
         {item.isDirectory
           ? 'Dir'
           : item.name.includes('.')
@@ -133,7 +157,7 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<TreeNode>) {
             : 'File'}
       </div>
       {/* Modified */}
-      <div className={`${COL_DATE} text-xs text-gray-500 pl-1`}>
+      <div style={{ width: colWidths.date, flexShrink: 0 }} className="text-xs text-gray-500 pl-1">
         {formatDate(item.modified)}
       </div>
     </div>
@@ -189,6 +213,7 @@ export function FilePane({
   const [treeHeight, setTreeHeight] = useState(300);
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedItem, setSelectedItem] = useState<FileItem | null>(null);
+  const [colWidths, setColWidths] = useState({ size: 80, type: 56, date: 128 });
   const observerRef = useRef<ResizeObserver | null>(null);
 
   // Context menu state
@@ -223,6 +248,37 @@ export function FilePane({
     },
     [contextMenuItems],
   );
+
+  // Column resize via keyboard — arrow keys nudge by 10px.
+  const keyResize = (e: React.KeyboardEvent, col: 'size' | 'type' | 'date') => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      setColWidths(prev => ({ ...prev, [col]: Math.max(40, prev[col] - 10) }));
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      setColWidths(prev => ({ ...prev, [col]: Math.min(500, prev[col] + 10) }));
+    }
+  };
+
+  // Column resize — captures start position and adjusts the named column on mousemove.
+  const startResize = (e: React.MouseEvent, col: 'size' | 'type' | 'date') => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = colWidths[col];
+    const onMove = (ev: MouseEvent) => {
+      setColWidths(prev => ({
+        ...prev,
+        [col]: Math.min(500, Math.max(40, startW + (ev.clientX - startX))),
+      }));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   // Navigate up one directory level
   const goUp = () => {
@@ -276,6 +332,7 @@ export function FilePane({
         isDragSource,
         paneId,
         onContextMenuRequest: handleContextMenuRequest,
+        colWidths,
       }}
     >
       <div
@@ -317,12 +374,21 @@ export function FilePane({
           </button>
         </div>
 
-        {/* ── Column headers ── */}
-        <div className="flex items-center px-1 py-0.5 bg-gray-800 border-b border-gray-700 flex-shrink-0">
-          <div className={`${COL_NAME} text-xs text-gray-500 font-medium px-1`}>Name</div>
-          <div className={`${COL_SIZE} text-xs text-gray-500 font-medium`}>Size</div>
-          <div className={`${COL_TYPE} text-xs text-gray-500 font-medium pl-1`}>Type</div>
-          <div className={`${COL_DATE} text-xs text-gray-500 font-medium pl-1`}>Modified</div>
+        {/* ── Column headers — resize handles sit on the left edge of each resizable column ── */}
+        <div className="flex items-center px-1 py-0.5 bg-gray-800 border-b border-gray-700 flex-shrink-0 select-none">
+          <div style={{ flex: 1, minWidth: 100 }} className="text-xs text-gray-500 font-medium px-1">Name</div>
+          <div style={{ width: colWidths.size, flexShrink: 0, position: 'relative' }} className="text-xs text-gray-500 font-medium text-right">
+            <ColResizeHandle onMouseDown={(e) => startResize(e, 'size')} onKeyDown={(e) => keyResize(e, 'size')} label="Size" currentWidth={colWidths.size} />
+            Size
+          </div>
+          <div style={{ width: colWidths.type, flexShrink: 0, position: 'relative' }} className="text-xs text-gray-500 font-medium pl-1">
+            <ColResizeHandle onMouseDown={(e) => startResize(e, 'type')} onKeyDown={(e) => keyResize(e, 'type')} label="Type" currentWidth={colWidths.type} />
+            Type
+          </div>
+          <div style={{ width: colWidths.date, flexShrink: 0, position: 'relative' }} className="text-xs text-gray-500 font-medium pl-1">
+            <ColResizeHandle onMouseDown={(e) => startResize(e, 'date')} onKeyDown={(e) => keyResize(e, 'date')} label="Modified" currentWidth={colWidths.date} />
+            Modified
+          </div>
         </div>
 
         {/* ── Error banner ── */}
