@@ -705,7 +705,10 @@ public sealed class AppBridge
                 // ── Window chrome ────────────────────────────────────────
                 case "dragWindow":
                     _dispatcher.InvokeAsync(() =>
-                        Application.Current.MainWindow?.DragMove());
+                    {
+                        try { Application.Current.MainWindow?.DragMove(); }
+                        catch (InvalidOperationException) { /* maximized or not focused — ignore */ }
+                    });
                     break;
 
                 case "closeWindow":

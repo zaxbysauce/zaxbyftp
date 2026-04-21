@@ -52,11 +52,24 @@ const PaneCtx = createContext<PaneCtxValue>({
 
 // ── Column resize handle ─────────────────────────────────────────────────────
 
-function ColResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => void }) {
+function ColResizeHandle({
+  onMouseDown,
+  onKeyDown,
+  label,
+}: {
+  onMouseDown: (e: React.MouseEvent) => void;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+  label: string;
+}) {
   return (
     <div
-      className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 z-10"
+      role="separator"
+      aria-label={`Resize ${label} column`}
+      aria-orientation="vertical"
+      tabIndex={0}
+      className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 focus:bg-blue-500 focus:outline-none z-10"
       onMouseDown={onMouseDown}
+      onKeyDown={onKeyDown}
     />
   );
 }
@@ -231,6 +244,17 @@ export function FilePane({
     [contextMenuItems],
   );
 
+  // Column resize via keyboard — arrow keys nudge by 10px.
+  const keyResize = (e: React.KeyboardEvent, col: 'size' | 'type' | 'date') => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      setColWidths(prev => ({ ...prev, [col]: Math.max(40, prev[col] - 10) }));
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      setColWidths(prev => ({ ...prev, [col]: prev[col] + 10 }));
+    }
+  };
+
   // Column resize — captures start position and adjusts the named column on mousemove.
   const startResize = (e: React.MouseEvent, col: 'size' | 'type' | 'date') => {
     e.preventDefault();
@@ -349,15 +373,15 @@ export function FilePane({
         <div className="flex items-center px-1 py-0.5 bg-gray-800 border-b border-gray-700 flex-shrink-0 select-none">
           <div style={{ flex: 1, minWidth: 100 }} className="text-xs text-gray-500 font-medium px-1">Name</div>
           <div style={{ width: colWidths.size, flexShrink: 0, position: 'relative' }} className="text-xs text-gray-500 font-medium text-right">
-            <ColResizeHandle onMouseDown={(e) => startResize(e, 'size')} />
+            <ColResizeHandle onMouseDown={(e) => startResize(e, 'size')} onKeyDown={(e) => keyResize(e, 'size')} label="Size" />
             Size
           </div>
           <div style={{ width: colWidths.type, flexShrink: 0, position: 'relative' }} className="text-xs text-gray-500 font-medium pl-1">
-            <ColResizeHandle onMouseDown={(e) => startResize(e, 'type')} />
+            <ColResizeHandle onMouseDown={(e) => startResize(e, 'type')} onKeyDown={(e) => keyResize(e, 'type')} label="Type" />
             Type
           </div>
           <div style={{ width: colWidths.date, flexShrink: 0, position: 'relative' }} className="text-xs text-gray-500 font-medium pl-1">
-            <ColResizeHandle onMouseDown={(e) => startResize(e, 'date')} />
+            <ColResizeHandle onMouseDown={(e) => startResize(e, 'date')} onKeyDown={(e) => keyResize(e, 'date')} label="Modified" />
             Modified
           </div>
         </div>
