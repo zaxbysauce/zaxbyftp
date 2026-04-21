@@ -85,8 +85,8 @@ function TransferRow({ t, onRemove }: { t: TransferItem; onRemove: (id: string) 
                 : `${pct.toFixed(0)}%`}
         </span>
 
-        {/* Dismiss button — visible on row hover; hidden while transfer is active */}
-        {!isActive && (
+        {/* Dismiss only for terminal states — pending/active have no C# cancel yet */}
+        {(isDone || isError) ? (
           <button
             onClick={() => onRemove(t.transferId)}
             title="Dismiss transfer"
@@ -94,6 +94,8 @@ function TransferRow({ t, onRemove }: { t: TransferItem; onRemove: (id: string) 
           >
             <X size={10} />
           </button>
+        ) : (
+          <div className="w-5 flex-shrink-0" />
         )}
       </div>
 
