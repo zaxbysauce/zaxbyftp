@@ -5,12 +5,13 @@
  * The bottom panel height is fixed (resizable in Phase 5).
  */
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { TopBar } from './components/TopBar';
 import { LocalPane } from './components/LocalPane';
 import { RemotePane } from './components/RemotePane';
 import { BottomPanel } from './components/BottomPanel';
 import { AppProvider } from './contexts/AppContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const BOTTOM_HEIGHT = 180; // px — fixed for Phase 4
 const MIN_PANE_WIDTH = 200; // px
@@ -20,6 +21,8 @@ function Layout() {
   const [splitRatio, setSplitRatio] = useState(0.5);
   const mainRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
+  const onMoveRef = useRef<(ev: MouseEvent) => void>();
+  const onUpRef = useRef<() => void>();
 
   const onSplitterMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -47,8 +50,23 @@ function Layout() {
       window.removeEventListener('mouseup', onUp);
     };
 
+    onMoveRef.current = onMove;
+    onUpRef.current = onUp;
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
+  }, []);
+
+  // Cleanup: remove splitter listeners if component unmounts during a drag
+  useEffect(() => {
+    return () => {
+      if (dragging.current) {
+        dragging.current = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        window.removeEventListener('mousemove', onMoveRef.current!);
+        window.removeEventListener('mouseup', onUpRef.current!);
+      }
+    };
   }, []);
 
   return (
@@ -96,7 +114,9 @@ function Layout() {
 export function App() {
   return (
     <AppProvider>
-      <Layout />
+      <ErrorBoundary>
+        <Layout />
+      </ErrorBoundary>
     </AppProvider>
   );
 }

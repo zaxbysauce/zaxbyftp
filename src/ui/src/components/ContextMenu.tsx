@@ -129,7 +129,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
             <button
               key={i}
               role="menuitem"
-              aria-selected={isFocused}
+              aria-current={isFocused ? "true" : undefined}
               disabled={item.disabled}
               onClick={() => {
                 item.onClick();

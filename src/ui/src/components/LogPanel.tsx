@@ -23,7 +23,7 @@ export function LogPanel() {
   }
 
   return (
-    <div className="overflow-y-auto h-full font-mono text-xs p-2 space-y-0.5">
+    <div role="log" aria-live="polite" className="overflow-y-auto h-full font-mono text-xs p-2 space-y-0.5">
       {state.logs.map(entry => (
         <div
           key={entry.id}

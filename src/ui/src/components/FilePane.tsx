@@ -353,6 +353,7 @@ export function FilePane({
               onClick={goUp}
               className="p-0.5 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-100"
               title="Go up"
+              aria-label="Go to parent directory"
             >
               <ArrowUp size={12} />
             </button>
@@ -369,6 +370,7 @@ export function FilePane({
             onClick={() => onPathChange(path)}
             className="p-0.5 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-100"
             title="Refresh"
+            aria-label="Refresh directory"
           >
             <RefreshCw size={12} />
           </button>
@@ -393,7 +395,7 @@ export function FilePane({
 
         {/* ── Error banner ── */}
         {error && (
-          <div className="px-2 py-1 text-xs text-red-400 bg-red-900/20 border-b border-red-800/30 flex-shrink-0">
+          <div role="alert" aria-live="assertive" className="px-2 py-1 text-xs text-red-400 bg-red-900/20 border-b border-red-800/30 flex-shrink-0">
             {error}
           </div>
         )}

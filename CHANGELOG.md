@@ -3,6 +3,25 @@
 All notable changes to FTP Client are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Added
+- **CancellationToken support** — All async file operations (Connect, ListDirectory, Upload, Download, Mkdir, Rename, Delete) now accept a CancellationToken parameter, enabling cancellation of in-progress operations from the frontend. Implemented through the entire stack: IFileClient interface, FtpFileClient and SftpFileClient adapters (with FluentFTP and SSH.NET token propagation), and AppBridge (which forwards JavaScript cancellation requests to the .NET layer).
+- **ErrorBoundary** — Added to catch unhandled JavaScript errors and display a fallback UI with a "Try Again" button, preventing white screens.
+- **Focus trapping** — Implemented in `ConfirmDialog` and `ModalInput` to contain focus, enable Tab cycling, close on Escape, and return focus to the trigger element.
+- **ARIA labels for icon buttons** — All icon-only buttons now include `aria-label` attributes for screen reader users.
+- **Form labels** — QuickConnect inputs (Host, Port, Protocol, Username, Password) now have associated `<label>` elements with `htmlFor` identifiers.
+- **Site dropdown click-outside** — The site manager dropdown now closes when clicking outside of it.
+- **Error banner ARIA** — Error banners use `role="alert"` and `aria-live="assertive"` for immediate screen reader announcements.
+- **BottomPanel tab roles** — Tabs now implement the ARIA tab pattern (`role="tablist"`, `role="tab"`, `role="tabpanel"`) with proper attributes.
+- **Transfer progress ARIA** — Progress bars include `role="progressbar"` with `aria-valuenow`, `aria-valuemin`, `aria-valuemax`, and `aria-valuetext`.
+- **LogPanel ARIA** — The log container uses `role="log"` with `aria-live="polite"` to announce new entries.
+- **Focus-visible styles** — Global CSS now shows focus rings only for keyboard navigation.
+- **Reduced motion support** — `@media (prefers-reduced-motion)` disables animations like `animate-pulse`.
+- **ContextMenu aria-current** — Focused items use `aria-current="true"` instead of `aria-selected`.
+- **saveSite error logging** — Errors are now caught and posted to the Log panel for visibility.
+- **Splitter cleanup** — Event listeners removed on unmount to prevent memory leaks.
+
 ## [1.0.1.0] - 2026-04-20
 
 ### Added

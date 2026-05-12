@@ -8,7 +8,7 @@
  * Modals: mkdir (overlay), rename (overlay) — inline within this component.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { FolderPlus, Wifi, WifiOff } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import type { FileItem } from '../types';
@@ -26,6 +26,10 @@ interface ModalInputProps {
   /** May be async; any thrown error is silently caught (AppContext logs it). */
   onConfirm: (value: string) => void | Promise<void>;
   onCancel: () => void;
+  /** Ref to the trigger element; focus is restored here when the modal closes. */
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
+  /** Unique id for the modal title aria attribute. */
+  modalId: string;
 }
 
 function ModalInput({
@@ -35,8 +39,87 @@ function ModalInput({
   confirmLabel,
   onConfirm,
   onCancel,
+  returnFocusRef,
+  modalId,
 }: ModalInputProps) {
   const [value, setValue] = useState(defaultValue);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const focusableElementsRef = useRef<HTMLElement[]>([]);
+
+  const getFocusableElements = useCallback(() => {
+    if (!modalRef.current) return [];
+    const elements = modalRef.current.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    return Array.from(elements).filter((el) => {
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    });
+  }, []);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onCancel();
+        return;
+      }
+
+      if (e.key === 'Tab') {
+        const focusableElements = getFocusableElements();
+        if (focusableElements.length === 0) return;
+
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+
+        if (e.shiftKey) {
+          // Shift + Tab: if on first element, move to last
+          if (document.activeElement === firstElement) {
+            e.preventDefault();
+            lastElement.focus();
+          }
+        } else {
+          // Tab: if on last element, move to first
+          if (document.activeElement === lastElement) {
+            e.preventDefault();
+            firstElement.focus();
+          }
+        }
+      }
+    },
+    [getFocusableElements, onCancel]
+  );
+
+  useEffect(() => {
+    const focusableElements = getFocusableElements();
+    focusableElementsRef.current = focusableElements;
+
+    // Focus the first focusable element when modal opens
+    if (focusableElements.length > 0) {
+      focusableElements[0].focus();
+    }
+
+    // Add keydown listener to the document to catch focus outside
+    const handleDocumentFocus = (e: Event) => {
+      const target = e.target as HTMLElement;
+      if (modalRef.current && !modalRef.current.contains(target)) {
+        e.preventDefault();
+        const firstElement = focusableElementsRef.current[0];
+        if (firstElement) {
+          firstElement.focus();
+        }
+      }
+    };
+
+    document.addEventListener('focusin', handleDocumentFocus, true);
+
+    return () => {
+      document.removeEventListener('focusin', handleDocumentFocus, true);
+      if (returnFocusRef?.current) {
+        returnFocusRef.current.focus();
+      }
+    };
+  }, [getFocusableElements]);
 
   // Async submit: awaits the onConfirm Promise so errors surface in the log
   // rather than being silently dropped by an unhandled Promise rejection.
@@ -51,39 +134,52 @@ function ModalInput({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <form
-        className="bg-gray-800 border border-gray-600 rounded p-4 w-72 shadow-xl"
-        onSubmit={submit}
+    <div
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onCancel();
+        }
+      }}
+    >
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={modalId}
+        onKeyDown={handleKeyDown}
       >
-        <h3 className="text-sm font-semibold text-gray-100 mb-3">{title}</h3>
-        <label className="block text-xs text-gray-400 mb-1">{label}</label>
-        <input
-          autoFocus
-          type="text"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          className="w-full px-2 py-1 rounded text-xs bg-gray-700 border border-gray-600
-                     text-gray-100 focus:outline-none focus:border-blue-500 mb-3"
-        />
-        <div className="flex gap-2 justify-end">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-3 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 text-gray-300"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={!value.trim()}
-            className="px-3 py-1 rounded text-xs bg-blue-600 hover:bg-blue-500
-                       disabled:opacity-50 text-white"
-          >
-            {confirmLabel}
-          </button>
-        </div>
-      </form>
+        <form onSubmit={submit}>
+          <h3 id={modalId} className="text-sm font-semibold text-gray-100 mb-3">
+            {title}
+          </h3>
+          <label className="block text-xs text-gray-400 mb-1">{label}</label>
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="w-full px-2 py-1 rounded text-xs bg-gray-700 border border-gray-600
+                       text-gray-100 focus:outline-none focus:border-blue-500 mb-3"
+          />
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-3 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 text-gray-300"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!value.trim()}
+              className="px-3 py-1 rounded text-xs bg-blue-600 hover:bg-blue-500
+                         disabled:opacity-50 text-white"
+            >
+              {confirmLabel}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -107,6 +203,11 @@ export function RemotePane() {
   const [mkdirOpen, setMkdirOpen]   = useState(false);
   const [renaming, setRenaming]     = useState<FileItem | null>(null);
   const [pendingDelete, setPendingDelete] = useState<FileItem | null>(null);
+
+  // Refs for return focus on modal close
+  const mkdirTriggerRef = useRef<HTMLButtonElement>(null);
+  // Captures the element that was focused when rename modal opens
+  const renameTriggerRef = useRef<HTMLElement | null>(null);
 
   // ── Navigation ──────────────────────────────────────────────────────────
   const handleNavigate = (item: FileItem) => {
@@ -155,7 +256,10 @@ export function RemotePane() {
 
     actions.push({
       label: 'Rename…',
-      onClick: () => setRenaming(item),
+      onClick: () => {
+        renameTriggerRef.current = document.activeElement as HTMLElement;
+        setRenaming(item);
+      },
     });
 
     actions.push({ label: '', separator: true, onClick: () => { /* sep */ } });
@@ -221,9 +325,11 @@ export function RemotePane() {
         contextMenuItems={contextMenuItems}
         extraActions={
           <button
+            ref={mkdirTriggerRef}
             onClick={() => setMkdirOpen(true)}
             className="p-0.5 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-100"
             title="New Folder"
+            aria-label="Create new folder"
           >
             <FolderPlus size={12} />
           </button>
@@ -236,6 +342,8 @@ export function RemotePane() {
           title="New Folder"
           label="Folder name"
           confirmLabel="Create"
+          modalId="mkdir-modal-title"
+          returnFocusRef={mkdirTriggerRef}
           onConfirm={async (name) => {
             setMkdirOpen(false);
             await mkdirRemote(state.remotePath, name);
@@ -251,6 +359,8 @@ export function RemotePane() {
           label="New name"
           defaultValue={renaming.name}
           confirmLabel="Rename"
+          modalId="rename-modal-title"
+          returnFocusRef={renameTriggerRef}
           onConfirm={async (newName) => {
             const dir = renaming.fullPath.replace(/\/[^/]+$/, '') || '/';
             const newPath = dir.replace(/\/+$/, '') + '/' + newName;

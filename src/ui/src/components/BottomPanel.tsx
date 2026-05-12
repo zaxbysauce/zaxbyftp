@@ -32,7 +32,7 @@ export function BottomPanel() {
   return (
     <div className="flex flex-col h-full bg-gray-900 border-t border-gray-700">
       {/* Tab bar */}
-      <div className="flex items-center gap-0 border-b border-gray-700 flex-shrink-0 bg-gray-800">
+      <div role="tablist" className="flex items-center gap-0 border-b border-gray-700 flex-shrink-0 bg-gray-800">
         {TABS.map(({ key, label, Icon }) => {
           const isActive = activeBottomTab === key;
           const badge =
@@ -44,12 +44,18 @@ export function BottomPanel() {
           return (
             <button
               key={key}
+              id={`tab-${key}`}
+              role="tab"
+              aria-selected={isActive}
+              aria-controls={`tabpanel-${key}`}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs border-r border-gray-700 transition-colors ${
                 isActive
                   ? 'bg-gray-900 text-blue-400 border-b-2 border-b-blue-400'
                   : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700'
               }`}
               onClick={() => setBottomTab(key)}
+              aria-label={`Show ${label} tab`}
+              tabIndex={isActive ? 0 : -1}
             >
               <Icon size={12} />
               {label}
@@ -71,17 +77,19 @@ export function BottomPanel() {
 
       {/* Tab content */}
       <div className="flex-1 overflow-hidden">
-        {activeBottomTab === 'transfers' && <TransferQueue />}
-        {activeBottomTab === 'log' && <LogPanel />}
+        {activeBottomTab === 'transfers' && <div role="tabpanel" id="tabpanel-transfers" aria-labelledby="tab-transfers"><TransferQueue /></div>}
+        {activeBottomTab === 'log' && <div role="tabpanel" id="tabpanel-log" aria-labelledby="tab-log"><LogPanel /></div>}
         {activeBottomTab === 'messages' && (
-          <MessagesPanel
-            hostKeyPrompt={hostKeyPrompt}
-            certPrompt={certPrompt}
-            onTrustHost={trustHost}
-            onRejectHost={rejectHost}
-            onTrustCert={trustCert}
-            onRejectCert={rejectCert}
-          />
+          <div role="tabpanel" id="tabpanel-messages" aria-labelledby="tab-messages">
+            <MessagesPanel
+              hostKeyPrompt={hostKeyPrompt}
+              certPrompt={certPrompt}
+              onTrustHost={trustHost}
+              onRejectHost={rejectHost}
+              onTrustCert={trustCert}
+              onRejectCert={rejectCert}
+            />
+          </div>
         )}
       </div>
     </div>

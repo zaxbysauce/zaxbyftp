@@ -5,7 +5,7 @@
  * interactive controls.  Window chrome buttons sit at the far right.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   ChevronDown,
   Globe,
@@ -37,9 +37,24 @@ export function TopBar() {
   const [siteName, setSiteName] = useState('');
   const [showSites, setShowSites] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const isConnecting = state.connectionStatus === 'connecting';
   const isConnected = state.connectionStatus === 'connected';
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!showSites) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowSites(false);
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside, { capture: true });
+    return () => document.removeEventListener('click', handleClickOutside, { capture: true });
+  }, [showSites]);
 
   // Default port when protocol changes
   const handleProtocolChange = (p: Protocol) => {
@@ -102,7 +117,7 @@ export function TopBar() {
       </span>
 
       {/* Site Manager dropdown */}
-      <div className="relative flex-shrink-0">
+      <div ref={dropdownRef} className="relative flex-shrink-0">
         <button
           className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-600"
           onClick={() => setShowSites(v => !v)}
@@ -134,44 +149,64 @@ export function TopBar() {
         className="flex items-center gap-1 flex-1 min-w-0 overflow-hidden cursor-default"
         onSubmit={handleConnect}
       >
-        <input
-          type="text"
-          placeholder="Host"
-          value={host}
-          onChange={e => setHost(e.target.value)}
-          className="flex-1 min-w-0 px-2 py-1 rounded text-xs bg-gray-800 border border-gray-600 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
-          style={{ minWidth: 80 }}
-        />
-        <input
-          type="number"
-          placeholder={defaultPort(protocol)}
-          value={port}
-          onChange={e => setPort(e.target.value)}
-          className="w-14 px-2 py-1 rounded text-xs bg-gray-800 border border-gray-600 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
-        />
-        <select
-          value={protocol}
-          onChange={e => handleProtocolChange(e.target.value as Protocol)}
-          className="px-1 py-1 rounded text-xs bg-gray-800 border border-gray-600 text-gray-100 focus:outline-none focus:border-blue-500"
-        >
-          {PROTOCOLS.map(p => (
-            <option key={p.value} value={p.value}>{p.label}</option>
-          ))}
-        </select>
-        <input
-          type="text"
-          placeholder="Username"
-          value={username}
-          onChange={e => setUsername(e.target.value)}
-          className="w-24 px-2 py-1 rounded text-xs bg-gray-800 border border-gray-600 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          className="w-24 px-2 py-1 rounded text-xs bg-gray-800 border border-gray-600 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
-        />
+        <div className="flex flex-col justify-center">
+          <label htmlFor="qc-host" className="text-xs text-gray-400 mb-0.5">Host</label>
+          <input
+            id="qc-host"
+            type="text"
+            placeholder="Host"
+            value={host}
+            onChange={e => setHost(e.target.value)}
+            className="flex-1 min-w-0 px-2 py-1 rounded text-xs bg-gray-800 border border-gray-600 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+            style={{ minWidth: 80 }}
+          />
+        </div>
+        <div className="flex flex-col justify-center">
+          <label htmlFor="qc-port" className="text-xs text-gray-400 mb-0.5">Port</label>
+          <input
+            id="qc-port"
+            type="number"
+            placeholder={defaultPort(protocol)}
+            value={port}
+            onChange={e => setPort(e.target.value)}
+            className="w-14 px-2 py-1 rounded text-xs bg-gray-800 border border-gray-600 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+          />
+        </div>
+        <div className="flex flex-col justify-center">
+          <label htmlFor="qc-protocol" className="text-xs text-gray-400 mb-0.5">Protocol</label>
+          <select
+            id="qc-protocol"
+            value={protocol}
+            onChange={e => handleProtocolChange(e.target.value as Protocol)}
+            className="px-1 py-1 rounded text-xs bg-gray-800 border border-gray-600 text-gray-100 focus:outline-none focus:border-blue-500"
+          >
+            {PROTOCOLS.map(p => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-col justify-center">
+          <label htmlFor="qc-username" className="text-xs text-gray-400 mb-0.5">Username</label>
+          <input
+            id="qc-username"
+            type="text"
+            placeholder="Username"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            className="w-24 px-2 py-1 rounded text-xs bg-gray-800 border border-gray-600 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+          />
+        </div>
+        <div className="flex flex-col justify-center">
+          <label htmlFor="qc-password" className="text-xs text-gray-400 mb-0.5">Password</label>
+          <input
+            id="qc-password"
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            className="w-24 px-2 py-1 rounded text-xs bg-gray-800 border border-gray-600 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+          />
+        </div>
 
         {isConnected ? (
           <button
@@ -221,6 +256,7 @@ export function TopBar() {
           className="p-1.5 rounded hover:bg-gray-700 text-gray-300 hover:text-white transition-colors"
           onClick={() => windowAction('minimizeWindow')}
           title="Minimize"
+          aria-label="Minimize window"
         >
           <Minus size={12} />
         </button>
@@ -228,6 +264,7 @@ export function TopBar() {
           className="p-1.5 rounded hover:bg-gray-700 text-gray-300 hover:text-white transition-colors"
           onClick={() => windowAction('maximizeWindow')}
           title="Maximize / Restore"
+          aria-label="Maximize or restore window"
         >
           <Maximize2 size={12} />
         </button>
@@ -235,6 +272,7 @@ export function TopBar() {
           className="p-1.5 rounded text-gray-300 hover:bg-red-600 hover:text-white transition-colors"
           onClick={() => windowAction('closeWindow')}
           title="Close"
+          aria-label="Close window"
         >
           <X size={12} />
         </button>

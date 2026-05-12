@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
 using FtpClient.Adapters;
@@ -181,13 +182,15 @@ public sealed class AppBridge
     ///   { type:"error",    requestId, message }              on failure
     /// </summary>
     public void Connect(string requestId, string host, int port,
-                        string user, string pass, string protocol)
+                        string user, string pass, string protocol,
+                        CancellationToken cancellationToken = default)
     {
-        _ = ConnectCoreAsync(requestId, host, port, user, pass, protocol);
+        _ = ConnectCoreAsync(requestId, host, port, user, pass, protocol, cancellationToken);
     }
 
     private async Task ConnectCoreAsync(string requestId, string host, int port,
-                                        string user, string pass, string protocol)
+                                        string user, string pass, string protocol,
+                                        CancellationToken cancellationToken)
     {
         try
         {
@@ -213,7 +216,7 @@ public sealed class AppBridge
                 ? BuildSftpClient()
                 : BuildFtpClient();
 
-            await client.ConnectAsync(profile);
+            await client.ConnectAsync(profile, cancellationToken);
 
             var sessionId = Guid.NewGuid().ToString("N");
             _sessions[sessionId] = client;
@@ -316,7 +319,7 @@ public sealed class AppBridge
     public void Disconnect(string sessionId)
     {
         if (_sessions.TryRemove(sessionId, out var client))
-            client.Disconnect();
+            client.Disconnect(default);
     }
 
     /// <summary>
@@ -346,7 +349,7 @@ public sealed class AppBridge
         {
             if (_sessions.TryRemove(key, out var client))
             {
-                try { client.Disconnect(); } catch { /* best-effort */ }
+                try { client.Disconnect(default); } catch { /* best-effort */ }
             }
         }
     }
@@ -359,18 +362,20 @@ public sealed class AppBridge
     /// Lists a remote directory.  Result delivered via:
     ///   { type:"response", requestId, result: JSON-array-of-RemoteItem }
     /// </summary>
-    public void ListDirectory(string requestId, string sessionId, string path)
+    public void ListDirectory(string requestId, string sessionId, string path,
+                              CancellationToken cancellationToken = default)
     {
-        _ = ListDirectoryCoreAsync(requestId, sessionId, path);
+        _ = ListDirectoryCoreAsync(requestId, sessionId, path, cancellationToken);
     }
 
     private async Task ListDirectoryCoreAsync(string requestId,
-                                              string sessionId, string path)
+                                              string sessionId, string path,
+                                              CancellationToken cancellationToken)
     {
         try
         {
             var client = RequireSession(sessionId);
-            var items  = await client.ListDirectoryAsync(path);
+            var items  = await client.ListDirectoryAsync(path, cancellationToken);
             PostResponse(requestId, JsonSerializer.Serialize(items, _json));
         }
         catch (Exception ex) { PostError(requestId, ex.Message); }
@@ -438,7 +443,8 @@ public sealed class AppBridge
     ///   status: "active" | "complete" | "error"
     /// </summary>
     public void Upload(string sessionId, string localPath,
-                       string remotePath, string transferId)
+                       string remotePath, string transferId,
+                       CancellationToken cancellationToken = default)
     {
         var validationResult = ValidateLocalPath(localPath, allowAnyAbsolute: true);
         if (validationResult is not null)
@@ -451,12 +457,14 @@ public sealed class AppBridge
                 transferId,
                 () => RequireSession(sessionId)
                           .UploadAsync(localPath, remotePath,
-                                       MakeProgress(transferId)));
+                                       MakeProgress(transferId), cancellationToken),
+                cancellationToken);
     }
 
     /// <summary>Same event shape as Upload.</summary>
     public void Download(string sessionId, string remotePath,
-                         string localPath, string transferId)
+                         string localPath, string transferId,
+                         CancellationToken cancellationToken = default)
     {
         var validationResult = ValidateLocalPath(localPath, allowAnyAbsolute: true);
         if (validationResult is not null)
@@ -469,11 +477,13 @@ public sealed class AppBridge
                 transferId,
                 () => RequireSession(sessionId)
                           .DownloadAsync(remotePath, localPath,
-                                         MakeProgress(transferId)));
+                                         MakeProgress(transferId), cancellationToken),
+                cancellationToken);
     }
 
     private async Task TransferCoreAsync(string transferId,
-                                         Func<Task> doTransfer)
+                                         Func<Task> doTransfer,
+                                         CancellationToken cancellationToken)
     {
         try
         {
@@ -532,18 +542,27 @@ public sealed class AppBridge
     //  FILE OPERATIONS  (void: result posted as { type:"ack", requestId })
     // ════════════════════════════════════════════════════════════════════════
 
-    public void Mkdir(string requestId, string sessionId, string path)
-        => _ = AckOpAsync(requestId, () => RequireSession(sessionId).MkdirAsync(path));
+    public void Mkdir(string requestId, string sessionId, string path,
+                      CancellationToken cancellationToken = default)
+        => _ = AckOpAsync(requestId,
+                           () => RequireSession(sessionId).MkdirAsync(path, cancellationToken),
+                           cancellationToken);
 
     public void Rename(string requestId, string sessionId,
-                       string oldPath, string newPath)
+                       string oldPath, string newPath,
+                       CancellationToken cancellationToken = default)
         => _ = AckOpAsync(requestId,
-                           () => RequireSession(sessionId).RenameAsync(oldPath, newPath));
+                           () => RequireSession(sessionId).RenameAsync(oldPath, newPath, cancellationToken),
+                           cancellationToken);
 
-    public void Delete(string requestId, string sessionId, string path)
-        => _ = AckOpAsync(requestId, () => RequireSession(sessionId).DeleteAsync(path));
+    public void Delete(string requestId, string sessionId, string path,
+                      CancellationToken cancellationToken = default)
+        => _ = AckOpAsync(requestId,
+                           () => RequireSession(sessionId).DeleteAsync(path, cancellationToken),
+                           cancellationToken);
 
-    private async Task AckOpAsync(string requestId, Func<Task> op)
+    private async Task AckOpAsync(string requestId, Func<Task> op,
+                                  CancellationToken cancellationToken)
     {
         try
         {
