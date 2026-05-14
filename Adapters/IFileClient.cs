@@ -1,3 +1,4 @@
+using System.Threading;
 using FtpClient.Models;
 
 namespace FtpClient.Adapters;
@@ -11,31 +12,31 @@ namespace FtpClient.Adapters;
 public interface IFileClient : IDisposable
 {
     /// <summary>Opens the connection. Throws on failure.</summary>
-    Task ConnectAsync(ConnectionProfile profile);
+    Task ConnectAsync(ConnectionProfile profile, CancellationToken cancellationToken = default);
 
     /// <summary>Lists the contents of <paramref name="path"/>.</summary>
-    Task<List<RemoteItem>> ListDirectoryAsync(string path);
+    Task<List<RemoteItem>> ListDirectoryAsync(string path, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Uploads <paramref name="localPath"/> to <paramref name="remotePath"/>.
     /// <paramref name="progress"/> receives snapshots during transfer; may be null.
     /// </summary>
     Task UploadAsync(string localPath, string remotePath,
-                     IProgress<TransferProgress>? progress);
+                     IProgress<TransferProgress>? progress, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Downloads <paramref name="remotePath"/> to <paramref name="localPath"/>.
     /// <paramref name="progress"/> receives snapshots during transfer; may be null.
     /// </summary>
     Task DownloadAsync(string remotePath, string localPath,
-                       IProgress<TransferProgress>? progress);
+                       IProgress<TransferProgress>? progress, CancellationToken cancellationToken = default);
 
-    Task MkdirAsync(string path);
-    Task RenameAsync(string oldPath, string newPath);
+    Task MkdirAsync(string path, CancellationToken cancellationToken = default);
+    Task RenameAsync(string oldPath, string newPath, CancellationToken cancellationToken = default);
 
     /// <summary>Deletes a file or directory at <paramref name="path"/>.</summary>
-    Task DeleteAsync(string path);
+    Task DeleteAsync(string path, CancellationToken cancellationToken = default);
 
     /// <summary>Closes the connection gracefully. Safe to call multiple times.</summary>
-    void Disconnect();
+    void Disconnect(CancellationToken cancellationToken = default);
 }

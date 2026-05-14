@@ -564,10 +564,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const saveSite = useCallback(
     async (site: Site) => {
-      await bridge.saveSite(site);
+      try {
+        await bridge.saveSite(site);
+      } catch (e) {
+        addLog(`Failed to save site: ${String(e)}`, 'error');
+        return;
+      }
       await loadSites();
     },
-    [loadSites],
+    [loadSites, addLog],
   );
 
   const deleteSite = useCallback(

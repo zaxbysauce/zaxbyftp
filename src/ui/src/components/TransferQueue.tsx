@@ -90,6 +90,7 @@ function TransferRow({ t, onRemove }: { t: TransferItem; onRemove: (id: string) 
           <button
             onClick={() => onRemove(t.transferId)}
             title="Dismiss transfer"
+            aria-label="Dismiss transfer"
             className="flex-shrink-0 p-0.5 rounded text-gray-600 hover:text-gray-300 hover:bg-gray-700 opacity-0 group-hover:opacity-100 transition-opacity"
           >
             <X size={10} />
@@ -105,6 +106,11 @@ function TransferRow({ t, onRemove }: { t: TransferItem; onRemove: (id: string) 
           <div
             className={`progress-bar-fill ${isDone ? 'complete' : ''}`}
             style={{ width: `${isDone ? 100 : pct}%` }}
+            role="progressbar"
+            aria-valuenow={isDone ? 100 : pct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuetext={`${isDone ? 100 : pct}% complete`}
           />
         </div>
       )}

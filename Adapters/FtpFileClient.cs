@@ -31,7 +31,7 @@ public sealed class FtpFileClient : IFileClient
     public Func<string, string, Task<bool>>? CertificateValidator { get; set; }
 
     // ── Connect ──────────────────────────────────────────────────────────
-    public async Task ConnectAsync(ConnectionProfile profile)
+    public async Task ConnectAsync(ConnectionProfile profile, CancellationToken cancellationToken = default)
     {
         Disconnect(); // clean up any previous connection
 
@@ -84,7 +84,7 @@ public sealed class FtpFileClient : IFileClient
         // Serialise Connect() through the semaphore like every other operation.
         // FTP doesn't support parallel commands — a concurrent Reconnect during
         // an active operation would corrupt the control-channel state.
-        await _sem.WaitAsync();
+        await _sem.WaitAsync(cancellationToken);
         try
         {
             _ftp = client;
@@ -100,7 +100,7 @@ public sealed class FtpFileClient : IFileClient
             //
             // Task.Run() guarantees execution on a ThreadPool thread with no context,
             // exactly as SftpFileClient wraps SSH.NET's synchronous Connect().
-            await Task.Run(() => client.Connect());
+            await Task.Run(() => client.Connect(), cancellationToken);
         }
         catch
         {
@@ -112,13 +112,13 @@ public sealed class FtpFileClient : IFileClient
     }
 
     // ── ListDirectory ────────────────────────────────────────────────────
-    public async Task<List<RemoteItem>> ListDirectoryAsync(string path)
+    public async Task<List<RemoteItem>> ListDirectoryAsync(string path, CancellationToken cancellationToken = default)
     {
         var ftp = RequireConnected();
-        await _sem.WaitAsync();
+        await _sem.WaitAsync(cancellationToken);
         try
         {
-            var items = await ftp.GetListing(path);
+            var items = await ftp.GetListing(path, cancellationToken);
             return items.Select(i => new RemoteItem
             {
                 Name        = i.Name,
@@ -134,7 +134,8 @@ public sealed class FtpFileClient : IFileClient
 
     // ── Upload ───────────────────────────────────────────────────────────
     public async Task UploadAsync(string localPath, string remotePath,
-                                  IProgress<TransferProgress>? progress)
+                                  IProgress<TransferProgress>? progress,
+                                  CancellationToken cancellationToken = default)
     {
         var ftp = RequireConnected();
 
@@ -150,7 +151,7 @@ public sealed class FtpFileClient : IFileClient
                     SpeedBytesPerSecond = p.TransferSpeed
                 }));
 
-        await _sem.WaitAsync();
+        await _sem.WaitAsync(cancellationToken);
         try
         {
             await ftp.UploadFile(
@@ -158,14 +159,16 @@ public sealed class FtpFileClient : IFileClient
                 FtpRemoteExists.Overwrite,
                 createRemoteDir: false,
                 FtpVerify.None,
-                ftpProgress);
+                ftpProgress,
+                token: cancellationToken);
         }
         finally { _sem.Release(); }
     }
 
     // ── Download ─────────────────────────────────────────────────────────
     public async Task DownloadAsync(string remotePath, string localPath,
-                                    IProgress<TransferProgress>? progress)
+                                    IProgress<TransferProgress>? progress,
+                                    CancellationToken cancellationToken = default)
     {
         var ftp = RequireConnected();
 
@@ -173,10 +176,10 @@ public sealed class FtpFileClient : IFileClient
         // actual download.  Releasing between the two would allow another operation
         // to alter server state (delete/replace the file) between our size query
         // and the transfer start.
-        await _sem.WaitAsync();
+        await _sem.WaitAsync(cancellationToken);
         try
         {
-            var info       = await ftp.GetObjectInfo(remotePath, dateModified: false);
+            var info       = await ftp.GetObjectInfo(remotePath, dateModified: false, token: cancellationToken);
             var totalBytes = info?.Size ?? -1L;
 
             IProgress<FtpProgress>? ftpProgress = progress is null ? null
@@ -192,51 +195,54 @@ public sealed class FtpFileClient : IFileClient
                 localPath, remotePath,
                 FtpLocalExists.Overwrite,
                 FtpVerify.None,
-                ftpProgress);
+                ftpProgress,
+                token: cancellationToken);
         }
         finally { _sem.Release(); }
     }
 
     // ── Mkdir / Rename / Delete ──────────────────────────────────────────
-    public async Task MkdirAsync(string path)
+    public async Task MkdirAsync(string path, CancellationToken cancellationToken = default)
     {
         var ftp = RequireConnected();
-        await _sem.WaitAsync();
-        try   { await ftp.CreateDirectory(path, force: true); }
+        await _sem.WaitAsync(cancellationToken);
+        try   { await ftp.CreateDirectory(path, force: true, token: cancellationToken); }
         finally { _sem.Release(); }
     }
 
-    public async Task RenameAsync(string oldPath, string newPath)
+    public async Task RenameAsync(string oldPath, string newPath, CancellationToken cancellationToken = default)
     {
         var ftp = RequireConnected();
-        await _sem.WaitAsync();
-        try   { await ftp.Rename(oldPath, newPath); }
+        await _sem.WaitAsync(cancellationToken);
+        try   { await ftp.Rename(oldPath, newPath, cancellationToken); }
         finally { _sem.Release(); }
     }
 
-    public async Task DeleteAsync(string path)
+    public async Task DeleteAsync(string path, CancellationToken cancellationToken = default)
     {
         var ftp = RequireConnected();
-        await _sem.WaitAsync();
+        await _sem.WaitAsync(cancellationToken);
         try
         {
             // Determine type first; if GetObjectInfo returns null we attempt
             // file deletion and let FluentFTP surface the error.
-            var info = await ftp.GetObjectInfo(path, dateModified: false);
+            var info = await ftp.GetObjectInfo(path, dateModified: false, token: cancellationToken);
             if (info?.Type == FtpObjectType.Directory)
-                await ftp.DeleteDirectory(path);
+                await ftp.DeleteDirectory(path, cancellationToken);
             else
-                await ftp.DeleteFile(path);
+                await ftp.DeleteFile(path, cancellationToken);
         }
         finally { _sem.Release(); }
     }
 
     // ── Disconnect / Dispose ─────────────────────────────────────────────
-    public void Disconnect()
+    public void Disconnect(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var ftp = _ftp;
         _ftp = null;
         if (ftp is null) return;
+        cancellationToken.ThrowIfCancellationRequested();
         try { ftp.Disconnect(); } catch { /* best-effort */ }
         ftp.Dispose();
     }

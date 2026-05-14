@@ -107,3 +107,19 @@ html, body, #root {
   outline-offset: -2px;
   background-color: rgba(59, 130, 246, 0.04);
 }
+
+/* ── Focus-visible (keyboard-only focus rings) ──────────────────────────── */
+*:focus {
+  outline: none;
+}
+*:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* ── Reduced motion ─────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse {
+    animation: none;
+  }
+}

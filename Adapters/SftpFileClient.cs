@@ -57,7 +57,8 @@ public sealed class SftpFileClient : IFileClient
     private static readonly object            _knownHostsLock = new();
 
     // ── Connect ───────────────────────────────────────────────────────────
-    public async Task ConnectAsync(ConnectionProfile profile)
+    public async Task ConnectAsync(ConnectionProfile profile,
+                                   CancellationToken cancellationToken = default)
     {
         Disconnect();
         _profile = profile;
@@ -71,11 +72,16 @@ public sealed class SftpFileClient : IFileClient
         // WPF dispatcher AND to ensure no SynchronizationContext is present on
         // the thread (required for safe .GetAwaiter().GetResult() inside the
         // HostKeyReceived handler).
-        await Task.Run(() => _sftp.Connect());
+        await Task.Run(() =>
+        {
+            _sftp.Connect();
+            cancellationToken.ThrowIfCancellationRequested();
+        }, cancellationToken);
     }
 
     // ── ListDirectory ─────────────────────────────────────────────────────
-    public Task<List<RemoteItem>> ListDirectoryAsync(string path)
+    public Task<List<RemoteItem>> ListDirectoryAsync(string path,
+                                                     CancellationToken cancellationToken = default)
     {
         var sftp = RequireConnected();
         return Task.Run(() =>
@@ -93,12 +99,13 @@ public sealed class SftpFileClient : IFileClient
                     Permissions = FormatPermissions(i.Attributes)
                 })
                 .ToList();
-        });
+        }, cancellationToken);
     }
 
     // ── Upload ────────────────────────────────────────────────────────────
     public Task UploadAsync(string localPath, string remotePath,
-                            IProgress<TransferProgress>? progress)
+                            IProgress<TransferProgress>? progress,
+                            CancellationToken cancellationToken = default)
     {
         var sftp = RequireConnected();
         var totalBytes = new FileInfo(localPath).Length;
@@ -106,7 +113,9 @@ public sealed class SftpFileClient : IFileClient
 
         return Task.Run(() =>
         {
+            cancellationToken.ThrowIfCancellationRequested();
             using var stream = File.OpenRead(localPath);
+            cancellationToken.ThrowIfCancellationRequested();
             sftp.UploadFile(stream, remotePath, uploadCallback: bytesUploaded =>
             {
                 if (progress is null) return;
@@ -118,18 +127,20 @@ public sealed class SftpFileClient : IFileClient
                     SpeedBytesPerSecond = elapsed > 0.001 ? bytesUploaded / elapsed : 0
                 });
             });
-        });
+        }, cancellationToken);
     }
 
     // ── Download ──────────────────────────────────────────────────────────
     public Task DownloadAsync(string remotePath, string localPath,
-                              IProgress<TransferProgress>? progress)
+                              IProgress<TransferProgress>? progress,
+                              CancellationToken cancellationToken = default)
     {
         var sftp = RequireConnected();
         var sw = Stopwatch.StartNew();
 
         return Task.Run(() =>
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var totalBytes = sftp.GetAttributes(remotePath).Size;
 
             // Ensure the local directory exists.
@@ -138,6 +149,7 @@ public sealed class SftpFileClient : IFileClient
                 Directory.CreateDirectory(dir);
 
             using var stream = File.Create(localPath);
+            cancellationToken.ThrowIfCancellationRequested();
             sftp.DownloadFile(remotePath, stream, bytesDownloaded =>
             {
                 if (progress is null) return;
@@ -149,23 +161,24 @@ public sealed class SftpFileClient : IFileClient
                     SpeedBytesPerSecond = elapsed > 0.001 ? bytesDownloaded / elapsed : 0
                 });
             });
-        });
+        }, cancellationToken);
     }
 
     // ── Mkdir / Rename / Delete ───────────────────────────────────────────
-    public Task MkdirAsync(string path)
+    public Task MkdirAsync(string path, CancellationToken cancellationToken = default)
     {
         var sftp = RequireConnected();
-        return Task.Run(() => sftp.CreateDirectory(path));
+        return Task.Run(() => sftp.CreateDirectory(path), cancellationToken);
     }
 
-    public Task RenameAsync(string oldPath, string newPath)
+    public Task RenameAsync(string oldPath, string newPath,
+                           CancellationToken cancellationToken = default)
     {
         var sftp = RequireConnected();
-        return Task.Run(() => sftp.RenameFile(oldPath, newPath));
+        return Task.Run(() => sftp.RenameFile(oldPath, newPath), cancellationToken);
     }
 
-    public Task DeleteAsync(string path)
+    public Task DeleteAsync(string path, CancellationToken cancellationToken = default)
     {
         var sftp = RequireConnected();
         return Task.Run(() =>
@@ -175,16 +188,18 @@ public sealed class SftpFileClient : IFileClient
                 sftp.DeleteDirectory(path);
             else
                 sftp.DeleteFile(path);
-        });
+        }, cancellationToken);
     }
 
     // ── Disconnect / Dispose ──────────────────────────────────────────────
-    public void Disconnect()
+    public void Disconnect(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var sftp = _sftp;
         _sftp    = null;
         _profile = null;
         if (sftp is null) return;
+        cancellationToken.ThrowIfCancellationRequested();
         try { sftp.Disconnect(); } catch { /* best-effort */ }
         sftp.Dispose();
     }
